@@ -22,11 +22,13 @@ services:
       PICKUP_RADIUS_M: ${PICKUP_RADIUS_M}
       DROPOFF_RADIUS_M: ${DROPOFF_RADIUS_M}
       MIN_ETA_SECONDS: ${MIN_ETA_SECONDS}
+      DOUBLE_GIS_API_KEY: ${DOUBLE_GIS_API_KEY}
     depends_on:
       psql_bp:
         condition: service_healthy
     networks:
       - blueprint
+      - pathfinder_blueprint
   psql_bp:
     image: postgis/postgis:17-3.5
     restart: unless-stopped
@@ -35,7 +37,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
-      - "${DB_PORT}:5432"
+      - "5433:5432"
     volumes:
       - psql_volume_bp:/var/lib/postgresql/data
     healthcheck:
@@ -51,4 +53,6 @@ volumes:
   psql_volume_bp:
 networks:
   blueprint:
+    external: true
+  pathfinder_blueprint:
     external: true

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver - Create Ride</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #map { width: 100%; height: 100%; }
+
+        #panel {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            min-width: 320px;
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+        }
+        #panel h2 { font-size: 16px; margin-bottom: 4px; }
+        .nav { font-size: 13px; margin-bottom: 12px; }
+        .nav a { color: #1a73e8; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        #status { font-size: 14px; color: #555; margin-bottom: 12px; }
+        #error { font-size: 13px; color: #d32f2f; margin-bottom: 8px; display: none; }
+
+        .field { margin-bottom: 10px; }
+        .field label { display: block; font-size: 12px; color: #555; margin-bottom: 2px; }
+        .field input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            background: #1a73e8;
+            color: white;
+            margin-right: 6px;
+        }
+        button:hover { background: #1557b0; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.secondary { background: #f1f3f4; color: #333; }
+        button.secondary:hover { background: #e0e0e0; }
+
+        .loading { opacity: 0.6; pointer-events: none; }
+
+        #rides-table { margin-top: 12px; width: 100%; font-size: 12px; border-collapse: collapse; }
+        #rides-table th { text-align: left; color: #777; padding: 4px 6px; border-bottom: 1px solid #eee; }
+        #rides-table td { padding: 4px 6px; border-bottom: 1px solid #f5f5f5; }
+        .color-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+        .legend { margin-top: 12px; font-size: 12px; color: #777; }
+        .legend div { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .dot.green { background: #34a853; }
+        .dot.red { background: #ea4335; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h2>Driver - Create Ride</h2>
+        <div class="nav"><a href="/passenger">Go to Passenger page &rarr;</a></div>
+        <div id="status">Click on the map to set Start (A)</div>
+        <div id="error"></div>
+
+        <div class="field">
+            <label>Driver ID</label>
+            <input type="text" id="driverId">
+        </div>
+
+        <div>
+            <button id="createBtn" disabled onclick="createRide()">Create Ride</button>
+            <button class="secondary" onclick="resetMarkers()">Reset</button>
+        </div>
+
+        <table id="rides-table">
+            <thead><tr><th></th><th>Ride ID</th><th>Driver ID</th><th>Status</th></tr></thead>
+            <tbody id="rides-body"></tbody>
+        </table>
+
+        <div class="legend">
+            <div><span class="dot green"></span> Start (A)</div>
+            <div><span class="dot red"></span> Finish (B)</div>
+        </div>
+    </div>
+
+    <script src="https://mapgl.2gis.com/api/js/v1"></script>
+    <script>
+        const ROUTE_COLORS = ['#1a73e8', '#ea4335', '#34a853', '#fa7b17', '#9C27B0', '#00BCD4', '#FF5722', '#795548'];
+        let colorIndex = 0;
+
+        let map, markerA, markerB;
+        let step = 1; // 1=set A, 2=set B
+        let rides = []; // {ride_id, driver_id, route_id, color, polylines[]}
+        let allPolylines = [];
+
+        function markerIcon(color) {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36">
+                <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="${color}"/>
+                <circle cx="12" cy="12" r="5" fill="white"/>
+            </svg>`;
+            return 'data:image/svg+xml;base64,' + btoa(svg);
+        }
+
+        function setStatus(text) { document.getElementById('status').textContent = text; }
+        function showError(text) {
+            const el = document.getElementById('error');
+            el.textContent = text;
+            el.style.display = text ? 'block' : 'none';
+        }
+
+        function newDriverId() {
+            document.getElementById('driverId').value = crypto.randomUUID();
+        }
+
+        function resetMarkers() {
+            if (markerA) { markerA.destroy(); markerA = null; }
+            if (markerB) { markerB.destroy(); markerB = null; }
+            step = 1;
+            document.getElementById('createBtn').disabled = true;
+            showError('');
+            setStatus('Click on the map to set Start (A)');
+        }
+
+        function updateRidesTable() {
+            const tbody = document.getElementById('rides-body');
+            tbody.innerHTML = '';
+            for (const r of rides) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="color-dot" style="background:${r.color}"></span></td>
+                    <td title="${r.ride_id}">${r.ride_id.substring(0, 8)}...</td>
+                    <td title="${r.driver_id}">${r.driver_id.substring(0, 8)}...</td>
+                    <td>${r.status}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        async function createRide() {
+            const driverId = document.getElementById('driverId').value.trim();
+            if (!driverId) { showError('Driver ID is required'); return; }
+
+            const coordsA = markerA.getCoordinates();
+            const coordsB = markerB.getCoordinates();
+
+            setStatus('Creating ride...');
+            showError('');
+            document.getElementById('panel').classList.add('loading');
+
+            try {
+                const resp = await fetch('/ride/driver/path', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        driver_id: driverId,
+                        start: { lat: coordsA[1], lon: coordsA[0] },
+                        finish: { lat: coordsB[1], lon: coordsB[0] },
+                    }),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+                const color = ROUTE_COLORS[colorIndex % ROUTE_COLORS.length];
+                colorIndex++;
+
+                // Fetch route geometry to draw on map
+                const routeResp = await fetch(`/api/route/${data.route_id}`);
+                if (!routeResp.ok) throw new Error('Failed to fetch route geometry');
+                const routeData = await routeResp.json();
+
+                // Draw route as single-color polyline
+                const polylines = [];
+                for (const seg of routeData.segments) {
+                    const coords = seg.coords.map(c => [c.lon, c.lat]);
+                    if (coords.length < 2) continue;
+                    const pl = new mapgl.Polyline(map, {
+                        coordinates: coords,
+                        width: 5,
+                        color: color,
+                    });
+                    polylines.push(pl);
+                    allPolylines.push(pl);
+                }
+
+                rides.push({
+                    ride_id: data.ride_id,
+                    route_id: data.route_id,
+                    driver_id: driverId,
+                    status: data.status,
+                    color: color,
+                    polylines: polylines,
+                });
+
+                updateRidesTable();
+
+                // Reset for next ride
+                resetMarkers();
+                newDriverId();
+                setStatus('Ride created! Click map to set next Start (A)');
+
+            } catch (err) {
+                showError('Failed: ' + err.message);
+                setStatus('Fix error and try again');
+            } finally {
+                document.getElementById('panel').classList.remove('loading');
+            }
+        }
+
+        async function initMap() {
+            const configResp = await fetch('/api/config');
+            const config = await configResp.json();
+
+            map = new mapgl.Map('map', {
+                center: [76.945, 43.238],
+                zoom: 13,
+                key: config.map_api_key,
+            });
+
+            map.on('click', (e) => {
+                const coords = e.lngLat;
+
+                if (step === 1) {
+                    showError('');
+                    markerA = new mapgl.Marker(map, {
+                        coordinates: coords,
+                        icon: markerIcon('#34a853'),
+                    });
+                    step = 2;
+                    setStatus('Click on the map to set Finish (B)');
+                } else if (step === 2) {
+                    markerB = new mapgl.Marker(map, {
+                        coordinates: coords,
+                        icon: markerIcon('#ea4335'),
+                    });
+                    document.getElementById('createBtn').disabled = false;
+                    setStatus('Click "Create Ride" or adjust points');
+                }
+            });
+
+            newDriverId();
+        }
+
+        initMap();
+    </script>
+</body>
+</html>

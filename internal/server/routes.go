@@ -20,6 +20,12 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r.GET("/", s.HelloWorldHandler)
 	r.GET("/health", s.healthHandler)
 
+	r.StaticFile("/driver", "./web/driver.html")
+	r.StaticFile("/passenger", "./web/passenger.html")
+	r.GET("/api/config", s.ConfigHandler)
+	r.GET("/api/route/:id", s.GetRouteHandler)
+	r.GET("/api/rides", s.ListRidesHandler)
+
 	ride := r.Group("/ride")
 	{
 		ride.POST("/driver/path", s.CreateDriverPathHandler)

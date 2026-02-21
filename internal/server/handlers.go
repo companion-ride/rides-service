@@ -12,6 +12,46 @@ import (
 	"rides/internal/pathfinder"
 )
 
+func (s *Server) ConfigHandler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"map_api_key": s.cfg.DoubleGISAPIKey})
+}
+
+func (s *Server) ListRidesHandler(c *gin.Context) {
+	rides, err := s.db.ListActiveRides(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rides"})
+		log.Printf("list rides error: %v", err)
+		return
+	}
+	type rideItem struct {
+		RideID  string  `json:"ride_id"`
+		RouteID string  `json:"route_id"`
+		StartLat  float64 `json:"start_lat"`
+		StartLon  float64 `json:"start_lon"`
+		FinishLat float64 `json:"finish_lat"`
+		FinishLon float64 `json:"finish_lon"`
+	}
+	items := make([]rideItem, len(rides))
+	for i, r := range rides {
+		items[i] = rideItem{
+			RideID: r.RideID, RouteID: r.RouteID,
+			StartLat: r.StartLat, StartLon: r.StartLon,
+			FinishLat: r.FinishLat, FinishLon: r.FinishLon,
+		}
+	}
+	c.JSON(http.StatusOK, items)
+}
+
+func (s *Server) GetRouteHandler(c *gin.Context) {
+	routeID := c.Param("id")
+	route, err := s.pathfinder.GetRoute(c.Request.Context(), routeID)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to get route: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, route)
+}
+
 func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 	var req CreateDriverPathRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

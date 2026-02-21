@@ -81,6 +81,7 @@ type Service interface {
 
 	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
 	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
+	ListActiveRides(ctx context.Context) ([]Ride, error)
 }
 
 type service struct {
@@ -281,4 +282,25 @@ func (s *service) GetDriverFraction(ctx context.Context, rideID string, lon, lat
 		return 0, fmt.Errorf("getting driver fraction: %w", err)
 	}
 	return frac, nil
+}
+
+func (s *service) ListActiveRides(ctx context.Context) ([]Ride, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT ride_id, driver_id, route_id, start_lat, start_lon, finish_lat, finish_lon, status
+		 FROM rides WHERE status IN ('pending', 'active') ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rides []Ride
+	for rows.Next() {
+		var r Ride
+		if err := rows.Scan(&r.RideID, &r.DriverID, &r.RouteID,
+			&r.StartLat, &r.StartLon, &r.FinishLat, &r.FinishLon, &r.Status); err != nil {
+			return nil, err
+		}
+		rides = append(rides, r)
+	}
+	return rides, rows.Err()
 }

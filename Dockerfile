@@ -1,4 +1,4 @@
-FROM golang:1.24.4-alpine AS build
+FROM golang:1.25.7-alpine AS build
 
 WORKDIR /app
 
@@ -13,6 +13,7 @@ FROM alpine:3.20.1 AS prod
 WORKDIR /app
 COPY --from=build /app/main /app/main
 COPY --from=build /app/migrations /app/migrations
+COPY --from=build /app/web /app/web
 EXPOSE ${PORT}
 CMD ["./main"]
 

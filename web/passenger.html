@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger - Find Ride</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #map { width: 100%; height: 100%; }
+
+        #panel {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            min-width: 320px;
+            max-height: calc(100vh - 32px);
+            overflow-y: auto;
+        }
+        #panel h2 { font-size: 16px; margin-bottom: 4px; }
+        .nav { font-size: 13px; margin-bottom: 12px; }
+        .nav a { color: #1a73e8; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        #status { font-size: 14px; color: #555; margin-bottom: 12px; }
+        #error { font-size: 13px; color: #d32f2f; margin-bottom: 8px; display: none; }
+
+        .field { margin-bottom: 10px; }
+        .field label { display: block; font-size: 12px; color: #555; margin-bottom: 2px; }
+        .field input {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            background: #34a853;
+            color: white;
+            margin-right: 6px;
+        }
+        button:hover { background: #2d9249; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        button.secondary { background: #f1f3f4; color: #333; }
+        button.secondary:hover { background: #e0e0e0; }
+
+        .loading { opacity: 0.6; pointer-events: none; }
+
+        #match-info {
+            margin-top: 12px;
+            padding: 10px;
+            background: #f0faf0;
+            border-radius: 6px;
+            font-size: 13px;
+            display: none;
+        }
+        #match-info .info-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        #match-info .info-label { color: #555; }
+        #match-info .info-value { font-weight: 600; color: #333; }
+        #match-info .info-value.driver { color: #1a73e8; }
+
+        .legend { margin-top: 12px; font-size: 12px; color: #777; }
+        .legend div { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .dot.green { background: #34a853; }
+        .dot.red { background: #ea4335; }
+        .dot.orange { background: #fa7b17; }
+        .dot.purple { background: #9C27B0; }
+        .line-sample { width: 20px; height: 4px; display: inline-block; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="panel">
+        <h2>Passenger - Find Ride</h2>
+        <div class="nav"><a href="/driver">&larr; Go to Driver page</a></div>
+        <div id="status">Click on the map to set Pickup</div>
+        <div id="error"></div>
+
+        <div class="field">
+            <label>Passenger ID</label>
+            <input type="text" id="passengerId">
+        </div>
+
+        <div>
+            <button id="findBtn" disabled onclick="findRide()">Find Ride</button>
+            <button class="secondary" onclick="resetAll()">Reset</button>
+        </div>
+
+        <div id="match-info"></div>
+
+        <div class="legend">
+            <div><span class="line-sample" style="background:#1a73e8;opacity:0.5"></span> Driver routes (existing)</div>
+            <div><span class="dot green"></span> Pickup</div>
+            <div><span class="dot red"></span> Dropoff</div>
+            <div><span class="dot orange"></span> Projected point on route</div>
+            <div><span class="line-sample" style="background:#9C27B0;border:1px dashed #9C27B0"></span> Walking path</div>
+        </div>
+    </div>
+
+    <script src="https://mapgl.2gis.com/api/js/v1"></script>
+    <script>
+        const ROUTE_COLORS = ['#1a73e8', '#ea4335', '#34a853', '#fa7b17', '#9C27B0', '#00BCD4', '#FF5722', '#795548'];
+
+        let map, markerPickup, markerDropoff, markerPickupProj, markerDropoffProj;
+        let walkPolyline = null;
+        let ridePolylines = [];
+        let step = 1; // 1=set pickup, 2=set dropoff
+
+        function markerIcon(color) {
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="36" viewBox="0 0 24 36">
+                <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24C24 5.4 18.6 0 12 0z" fill="${color}"/>
+                <circle cx="12" cy="12" r="5" fill="white"/>
+            </svg>`;
+            return 'data:image/svg+xml;base64,' + btoa(svg);
+        }
+
+        function setStatus(text) { document.getElementById('status').textContent = text; }
+        function showError(text) {
+            const el = document.getElementById('error');
+            el.textContent = text;
+            el.style.display = text ? 'block' : 'none';
+        }
+
+        function newPassengerId() {
+            document.getElementById('passengerId').value = crypto.randomUUID();
+        }
+
+        function clearMapObjects() {
+            [markerPickup, markerDropoff, markerPickupProj, markerDropoffProj].forEach(m => m && m.destroy());
+            if (walkPolyline) walkPolyline.destroy();
+            markerPickup = markerDropoff = markerPickupProj = markerDropoffProj = null;
+            walkPolyline = null;
+        }
+
+        function resetAll() {
+            clearMapObjects();
+            step = 1;
+            document.getElementById('findBtn').disabled = true;
+            document.getElementById('match-info').style.display = 'none';
+            showError('');
+            newPassengerId();
+            setStatus('Click on the map to set Pickup');
+        }
+
+        async function findRide() {
+            const passengerId = document.getElementById('passengerId').value.trim();
+            if (!passengerId) { showError('Passenger ID is required'); return; }
+
+            const pickupCoords = markerPickup.getCoordinates();
+            const dropoffCoords = markerDropoff.getCoordinates();
+
+            setStatus('Finding ride...');
+            showError('');
+            document.getElementById('match-info').style.display = 'none';
+            document.getElementById('panel').classList.add('loading');
+
+            try {
+                const resp = await fetch('/ride/passenger/match', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        passenger_id: passengerId,
+                        pickup: { lat: pickupCoords[1], lon: pickupCoords[0] },
+                        dropoff: { lat: dropoffCoords[1], lon: dropoffCoords[0] },
+                    }),
+                });
+
+                if (resp.status === 404) {
+                    showError('No matching ride found');
+                    setStatus('No match. Try different points or Reset');
+                    return;
+                }
+
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || `HTTP ${resp.status}`);
+                }
+
+                const data = await resp.json();
+
+                // Draw projected points on route
+                markerPickupProj = new mapgl.Marker(map, {
+                    coordinates: [data.pickup_point.lon, data.pickup_point.lat],
+                    icon: markerIcon('#fa7b17'),
+                });
+                markerDropoffProj = new mapgl.Marker(map, {
+                    coordinates: [data.dropoff_point.lon, data.dropoff_point.lat],
+                    icon: markerIcon('#fa7b17'),
+                });
+
+                // Draw walking path if available
+                if (data.walk_to_pickup && data.walk_to_pickup.geometry && data.walk_to_pickup.geometry.length >= 2) {
+                    const walkCoords = data.walk_to_pickup.geometry.map(c => [c.lon, c.lat]);
+                    walkPolyline = new mapgl.Polyline(map, {
+                        coordinates: walkCoords,
+                        width: 3,
+                        color: '#9C27B0',
+                        dashLength: 8,
+                        gapLength: 8,
+                        gapColor: 'transparent',
+                    });
+                }
+
+                // Show match info
+                const info = document.getElementById('match-info');
+                let walkInfo = '';
+                if (data.walk_to_pickup) {
+                    walkInfo = `
+                        <div class="info-row">
+                            <span class="info-label">Walk distance:</span>
+                            <span class="info-value">${data.walk_to_pickup.walk_distance}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Walk duration:</span>
+                            <span class="info-value">${data.walk_to_pickup.walk_duration}</span>
+                        </div>
+                    `;
+                }
+                info.innerHTML = `
+                    <div class="info-row">
+                        <span class="info-label">Driver:</span>
+                        <span class="info-value driver" title="${data.driver_id}">${data.driver_id.substring(0, 8)}...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Ride:</span>
+                        <span class="info-value" title="${data.ride_id}">${data.ride_id.substring(0, 8)}...</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Pickup walk:</span>
+                        <span class="info-value">${data.pickup_walk_m.toFixed(0)} m</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Dropoff walk:</span>
+                        <span class="info-value">${data.dropoff_walk_m.toFixed(0)} m</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Total walk:</span>
+                        <span class="info-value">${data.total_walk_m.toFixed(0)} m</span>
+                    </div>
+                    ${walkInfo}
+                `;
+                info.style.display = 'block';
+
+                setStatus('Match found! Reset to try again');
+
+            } catch (err) {
+                showError('Failed: ' + err.message);
+                setStatus('Fix error and try again');
+            } finally {
+                document.getElementById('panel').classList.remove('loading');
+            }
+        }
+
+        async function initMap() {
+            const configResp = await fetch('/api/config');
+            const config = await configResp.json();
+
+            map = new mapgl.Map('map', {
+                center: [76.945, 43.238],
+                zoom: 13,
+                key: config.map_api_key,
+            });
+
+            map.on('click', (e) => {
+                const coords = e.lngLat;
+
+                if (step === 1) {
+                    showError('');
+                    document.getElementById('match-info').style.display = 'none';
+                    // Clear old projected markers and walk line
+                    [markerPickupProj, markerDropoffProj].forEach(m => m && m.destroy());
+                    if (walkPolyline) walkPolyline.destroy();
+                    markerPickupProj = markerDropoffProj = null;
+                    walkPolyline = null;
+
+                    markerPickup = new mapgl.Marker(map, {
+                        coordinates: coords,
+                        icon: markerIcon('#34a853'),
+                    });
+                    step = 2;
+                    setStatus('Click on the map to set Dropoff');
+                } else if (step === 2) {
+                    markerDropoff = new mapgl.Marker(map, {
+                        coordinates: coords,
+                        icon: markerIcon('#ea4335'),
+                    });
+                    document.getElementById('findBtn').disabled = false;
+                    setStatus('Click "Find Ride" or adjust points');
+                }
+            });
+
+            newPassengerId();
+
+            // Load existing driver rides and draw them on the map
+            await loadDriverRides();
+        }
+
+        async function loadDriverRides() {
+            try {
+                const resp = await fetch('/api/rides');
+                if (!resp.ok) return;
+                const rides = await resp.json();
+                if (!rides || !rides.length) return;
+
+                for (let i = 0; i < rides.length; i++) {
+                    const ride = rides[i];
+                    const color = ROUTE_COLORS[i % ROUTE_COLORS.length];
+                    try {
+                        const routeResp = await fetch(`/api/route/${ride.route_id}`);
+                        if (!routeResp.ok) continue;
+                        const routeData = await routeResp.json();
+                        for (const seg of routeData.segments) {
+                            const coords = seg.coords.map(c => [c.lon, c.lat]);
+                            if (coords.length < 2) continue;
+                            const pl = new mapgl.Polyline(map, {
+                                coordinates: coords,
+                                width: 4,
+                                color: color,
+                                opacity: 0.5,
+                            });
+                            ridePolylines.push(pl);
+                        }
+                    } catch (e) { /* skip this ride */ }
+                }
+            } catch (e) { /* non-fatal */ }
+        }
+
+        initMap();
+    </script>
+</body>
+</html>

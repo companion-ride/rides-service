@@ -17,6 +17,7 @@ type Config struct {
 	DBSchema           string
 	PathfinderURL      string
 	LocationServiceURL string
+	DoubleGISAPIKey    string
 	MaxPassengers      int
 	PickupRadiusM      float64
 	DropoffRadiusM     float64
@@ -40,6 +41,7 @@ func Load() *Config {
 		DBSchema:           os.Getenv("DB_SCHEMA"),
 		PathfinderURL:      os.Getenv("PATHFINDER_URL"),
 		LocationServiceURL: os.Getenv("LOCATION_SERVICE_URL"),
+		DoubleGISAPIKey:    os.Getenv("DOUBLE_GIS_API_KEY"),
 		MaxPassengers:      maxPassengers,
 		PickupRadiusM:      pickupRadius,
 		DropoffRadiusM:     dropoffRadius,
