@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS sub_rides;
+DROP TABLE IF EXISTS rides;

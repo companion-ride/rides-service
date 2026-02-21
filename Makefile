@@ -5,8 +5,8 @@ all: build test
 
 build:
 	@echo "Building..."
-	
-	
+
+
 	@go build -o main cmd/api/main.go
 
 # Run the application
@@ -61,4 +61,17 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch docker-run docker-down itest
+# Database migrations
+migrate-up:
+	@go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+		-path migrations \
+		-database "postgres://$${DB_USERNAME}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT}/$${DB_DATABASE}?sslmode=disable&search_path=$${DB_SCHEMA}" \
+		up
+
+migrate-down:
+	@go run github.com/golang-migrate/migrate/v4/cmd/migrate@latest \
+		-path migrations \
+		-database "postgres://$${DB_USERNAME}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT}/$${DB_DATABASE}?sslmode=disable&search_path=$${DB_SCHEMA}" \
+		down 1
+
+.PHONY: all build run test clean watch docker-run docker-down itest migrate-up migrate-down

@@ -5,77 +5,119 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "github.com/joho/godotenv/autoload"
 )
 
-// Service represents a service that interacts with a database.
-type Service interface {
-	// Health returns a map of health status information.
-	// The keys and values in the map are service-specific.
-	Health() map[string]string
+type Ride struct {
+	RideID        string
+	DriverID      string
+	RouteID       string
+	GeometryWKT   string
+	StartLat      float64
+	StartLon      float64
+	FinishLat     float64
+	FinishLon     float64
+	TotalDuration int
+	Status        string
+	StartedAt     *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
 
-	// Close terminates the database connection.
-	// It returns an error if the connection cannot be closed.
+type SubRide struct {
+	SubRideID   string
+	RideID      string
+	PassengerID string
+	PickupLat   float64
+	PickupLon   float64
+	DropoffLat  float64
+	DropoffLon  float64
+	StartLat    float64
+	StartLon    float64
+	FinishLat   float64
+	FinishLon   float64
+	Status      string
+}
+
+type MatchParams struct {
+	PickupLon    float64
+	PickupLat    float64
+	DropoffLon   float64
+	DropoffLat   float64
+	PickupRadius float64
+	DropoffRadius float64
+	MaxResults   int
+}
+
+type MatchResult struct {
+	RideID        string
+	DriverID      string
+	RouteID       string
+	TotalDuration int
+	Status        string
+	PickupWalkM   float64
+	DropoffWalkM  float64
+	PickupFrac    float64
+	DropoffFrac   float64
+	PickupPointLat  float64
+	PickupPointLon  float64
+	DropoffPointLat float64
+	DropoffPointLon float64
+}
+
+type Service interface {
+	Health() map[string]string
 	Close() error
+
+	CreateRide(ctx context.Context, ride *Ride) error
+	GetRide(ctx context.Context, rideID string) (*Ride, error)
+	UpdateRideStatus(ctx context.Context, rideID, status string) error
+
+	CreateSubRide(ctx context.Context, subRide *SubRide) error
+	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
+
+	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
+	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
 }
 
 type service struct {
 	db *sql.DB
 }
 
-var (
-	database   = os.Getenv("BLUEPRINT_DB_DATABASE")
-	password   = os.Getenv("BLUEPRINT_DB_PASSWORD")
-	username   = os.Getenv("BLUEPRINT_DB_USERNAME")
-	port       = os.Getenv("BLUEPRINT_DB_PORT")
-	host       = os.Getenv("BLUEPRINT_DB_HOST")
-	schema     = os.Getenv("BLUEPRINT_DB_SCHEMA")
-	dbInstance *service
-)
+var dbInstance *service
 
-func New() Service {
-	// Reuse Connection
+func New(connStr string) Service {
 	if dbInstance != nil {
 		return dbInstance
 	}
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&search_path=%s", username, password, host, port, database, schema)
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
 		log.Fatal(err)
 	}
-	dbInstance = &service{
-		db: db,
-	}
+	dbInstance = &service{db: db}
 	return dbInstance
 }
 
-// Health checks the health of the database connection by pinging the database.
-// It returns a map with keys indicating various health statistics.
 func (s *service) Health() map[string]string {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	stats := make(map[string]string)
 
-	// Ping the database
 	err := s.db.PingContext(ctx)
 	if err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
-		log.Fatalf("db down: %v", err) // Log the error and terminate the program
+		log.Fatalf("db down: %v", err)
 		return stats
 	}
 
-	// Database is up, add more statistics
 	stats["status"] = "up"
 	stats["message"] = "It's healthy"
 
-	// Get database stats (like open connections, in use, idle, etc.)
 	dbStats := s.db.Stats()
 	stats["open_connections"] = strconv.Itoa(dbStats.OpenConnections)
 	stats["in_use"] = strconv.Itoa(dbStats.InUse)
@@ -85,19 +127,15 @@ func (s *service) Health() map[string]string {
 	stats["max_idle_closed"] = strconv.FormatInt(dbStats.MaxIdleClosed, 10)
 	stats["max_lifetime_closed"] = strconv.FormatInt(dbStats.MaxLifetimeClosed, 10)
 
-	// Evaluate stats to provide a health message
-	if dbStats.OpenConnections > 40 { // Assuming 50 is the max for this example
+	if dbStats.OpenConnections > 40 {
 		stats["message"] = "The database is experiencing heavy load."
 	}
-
 	if dbStats.WaitCount > 1000 {
 		stats["message"] = "The database has a high number of wait events, indicating potential bottlenecks."
 	}
-
 	if dbStats.MaxIdleClosed > int64(dbStats.OpenConnections)/2 {
 		stats["message"] = "Many idle connections are being closed, consider revising the connection pool settings."
 	}
-
 	if dbStats.MaxLifetimeClosed > int64(dbStats.OpenConnections)/2 {
 		stats["message"] = "Many connections are being closed due to max lifetime, consider increasing max lifetime or revising the connection usage pattern."
 	}
@@ -105,11 +143,142 @@ func (s *service) Health() map[string]string {
 	return stats
 }
 
-// Close closes the database connection.
-// It logs a message indicating the disconnection from the specific database.
-// If the connection is successfully closed, it returns nil.
-// If an error occurs while closing the connection, it returns the error.
 func (s *service) Close() error {
-	log.Printf("Disconnected from database: %s", database)
+	log.Println("Disconnected from database")
 	return s.db.Close()
+}
+
+func (s *service) CreateRide(ctx context.Context, ride *Ride) error {
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, status)
+		 VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7, $8, $9)
+		 RETURNING ride_id`,
+		ride.DriverID, ride.RouteID, ride.GeometryWKT,
+		ride.StartLat, ride.StartLon, ride.FinishLat, ride.FinishLon,
+		ride.TotalDuration, ride.Status,
+	).Scan(&ride.RideID)
+	if err != nil {
+		return fmt.Errorf("inserting ride: %w", err)
+	}
+	return nil
+}
+
+func (s *service) GetRide(ctx context.Context, rideID string) (*Ride, error) {
+	var ride Ride
+	err := s.db.QueryRowContext(ctx,
+		`SELECT ride_id, driver_id, route_id, ST_AsText(geometry),
+		        start_lat, start_lon, finish_lat, finish_lon,
+		        total_duration, status, started_at, created_at, updated_at
+		 FROM rides WHERE ride_id = $1`,
+		rideID,
+	).Scan(&ride.RideID, &ride.DriverID, &ride.RouteID, &ride.GeometryWKT,
+		&ride.StartLat, &ride.StartLon, &ride.FinishLat, &ride.FinishLon,
+		&ride.TotalDuration, &ride.Status, &ride.StartedAt, &ride.CreatedAt, &ride.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &ride, nil
+}
+
+func (s *service) UpdateRideStatus(ctx context.Context, rideID, status string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE rides SET status = $1, updated_at = now() WHERE ride_id = $2`,
+		status, rideID,
+	)
+	return err
+}
+
+func (s *service) CreateSubRide(ctx context.Context, sr *SubRide) error {
+	err := s.db.QueryRowContext(ctx,
+		`INSERT INTO sub_rides (ride_id, passenger_id, pickup_lat, pickup_lon, dropoff_lat, dropoff_lon,
+		                        start_lat, start_lon, finish_lat, finish_lon, status)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		 RETURNING sub_ride_id`,
+		sr.RideID, sr.PassengerID,
+		sr.PickupLat, sr.PickupLon, sr.DropoffLat, sr.DropoffLon,
+		sr.StartLat, sr.StartLon, sr.FinishLat, sr.FinishLon,
+		sr.Status,
+	).Scan(&sr.SubRideID)
+	if err != nil {
+		return fmt.Errorf("inserting sub_ride: %w", err)
+	}
+	return nil
+}
+
+func (s *service) CountActiveSubRides(ctx context.Context, rideID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sub_rides WHERE ride_id = $1 AND status IN ('pending', 'active')`,
+		rideID,
+	).Scan(&count)
+	return count, err
+}
+
+func (s *service) FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error) {
+	query := `
+WITH candidates AS (
+    SELECT r.ride_id, r.driver_id, r.route_id, r.geometry, r.total_duration, r.status
+    FROM rides r
+    WHERE r.status IN ('pending', 'active')
+      AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5)
+      AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $6)
+)
+SELECT
+    c.ride_id, c.driver_id, c.route_id, c.total_duration, c.status,
+    ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) AS pickup_walk_m,
+    ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography) AS dropoff_walk_m,
+    ST_LineLocatePoint(c.geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS pickup_frac,
+    ST_LineLocatePoint(c.geometry, ST_SetSRID(ST_MakePoint($3, $4), 4326)) AS dropoff_frac,
+    ST_Y(ST_ClosestPoint(c.geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326))) AS pickup_point_lat,
+    ST_X(ST_ClosestPoint(c.geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326))) AS pickup_point_lon,
+    ST_Y(ST_ClosestPoint(c.geometry, ST_SetSRID(ST_MakePoint($3, $4), 4326))) AS dropoff_point_lat,
+    ST_X(ST_ClosestPoint(c.geometry, ST_SetSRID(ST_MakePoint($3, $4), 4326))) AS dropoff_point_lon
+FROM candidates c
+WHERE ST_LineLocatePoint(c.geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326))
+    < ST_LineLocatePoint(c.geometry, ST_SetSRID(ST_MakePoint($3, $4), 4326))
+ORDER BY (
+    ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) +
+    ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography)
+)
+LIMIT $7`
+
+	rows, err := s.db.QueryContext(ctx, query,
+		params.PickupLon, params.PickupLat,
+		params.DropoffLon, params.DropoffLat,
+		params.PickupRadius, params.DropoffRadius,
+		params.MaxResults,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("finding matching rides: %w", err)
+	}
+	defer rows.Close()
+
+	var results []MatchResult
+	for rows.Next() {
+		var m MatchResult
+		if err := rows.Scan(
+			&m.RideID, &m.DriverID, &m.RouteID, &m.TotalDuration, &m.Status,
+			&m.PickupWalkM, &m.DropoffWalkM,
+			&m.PickupFrac, &m.DropoffFrac,
+			&m.PickupPointLat, &m.PickupPointLon,
+			&m.DropoffPointLat, &m.DropoffPointLon,
+		); err != nil {
+			return nil, fmt.Errorf("scanning match result: %w", err)
+		}
+		results = append(results, m)
+	}
+	return results, rows.Err()
+}
+
+func (s *service) GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error) {
+	var frac float64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT ST_LineLocatePoint(geometry, ST_SetSRID(ST_MakePoint($2, $3), 4326))
+		 FROM rides WHERE ride_id = $1`,
+		rideID, lon, lat,
+	).Scan(&frac)
+	if err != nil {
+		return 0, fmt.Errorf("getting driver fraction: %w", err)
+	}
+	return frac, nil
 }

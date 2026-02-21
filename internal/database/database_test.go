@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+var testConnStr string
 
 func mustStartPostgresContainer() (func(context.Context, ...testcontainers.TerminateOption) error, error) {
 	var (
@@ -20,7 +23,7 @@ func mustStartPostgresContainer() (func(context.Context, ...testcontainers.Termi
 
 	dbContainer, err := postgres.Run(
 		context.Background(),
-		"postgres:latest",
+		"postgis/postgis:17-3.5",
 		postgres.WithDatabase(dbName),
 		postgres.WithUsername(dbUser),
 		postgres.WithPassword(dbPwd),
@@ -33,10 +36,6 @@ func mustStartPostgresContainer() (func(context.Context, ...testcontainers.Termi
 		return nil, err
 	}
 
-	database = dbName
-	password = dbPwd
-	username = dbUser
-
 	dbHost, err := dbContainer.Host(context.Background())
 	if err != nil {
 		return dbContainer.Terminate, err
@@ -47,8 +46,8 @@ func mustStartPostgresContainer() (func(context.Context, ...testcontainers.Termi
 		return dbContainer.Terminate, err
 	}
 
-	host = dbHost
-	port = dbPort.Port()
+	testConnStr = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		dbUser, dbPwd, dbHost, dbPort.Port(), dbName)
 
 	return dbContainer.Terminate, err
 }
@@ -67,14 +66,16 @@ func TestMain(m *testing.M) {
 }
 
 func TestNew(t *testing.T) {
-	srv := New()
+	dbInstance = nil // reset singleton
+	srv := New(testConnStr)
 	if srv == nil {
 		t.Fatal("New() returned nil")
 	}
 }
 
 func TestHealth(t *testing.T) {
-	srv := New()
+	dbInstance = nil
+	srv := New(testConnStr)
 
 	stats := srv.Health()
 
@@ -92,7 +93,8 @@ func TestHealth(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	srv := New()
+	dbInstance = nil
+	srv := New(testConnStr)
 
 	if srv.Close() != nil {
 		t.Fatalf("expected Close() to return nil")
