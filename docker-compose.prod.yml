@@ -1,0 +1,34 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    restart: unless-stopped
+    ports:
+      - ${PORT}:${PORT}
+    environment:
+      APP_ENV: ${APP_ENV}
+      PORT: ${PORT}
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SCHEMA: ${DB_SCHEMA}
+      PATHFINDER_URL: ${PATHFINDER_URL}
+      LOCATION_SERVICE_URL: ${LOCATION_SERVICE_URL}
+      MAX_PASSENGERS: ${MAX_PASSENGERS}
+      PICKUP_RADIUS_M: ${PICKUP_RADIUS_M}
+      DROPOFF_RADIUS_M: ${DROPOFF_RADIUS_M}
+      MIN_ETA_SECONDS: ${MIN_ETA_SECONDS}
+      DOUBLE_GIS_API_KEY: ${DOUBLE_GIS_API_KEY}
+    networks:
+      - blueprint
+      - pathfinder_blueprint
+
+networks:
+  blueprint:
+    external: true
+  pathfinder_blueprint:
+    external: true

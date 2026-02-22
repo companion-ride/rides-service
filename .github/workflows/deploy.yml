@@ -1,0 +1,32 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, rides]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and deploy
+        env:
+          PORT: ${{ secrets.PORT }}
+          APP_ENV: ${{ secrets.APP_ENV }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_DATABASE: ${{ secrets.DB_DATABASE }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_SCHEMA: ${{ secrets.DB_SCHEMA }}
+          PATHFINDER_URL: ${{ secrets.PATHFINDER_URL }}
+          LOCATION_SERVICE_URL: ${{ secrets.LOCATION_SERVICE_URL }}
+          MAX_PASSENGERS: ${{ secrets.MAX_PASSENGERS }}
+          PICKUP_RADIUS_M: ${{ secrets.PICKUP_RADIUS_M }}
+          DROPOFF_RADIUS_M: ${{ secrets.DROPOFF_RADIUS_M }}
+          MIN_ETA_SECONDS: ${{ secrets.MIN_ETA_SECONDS }}
+          DOUBLE_GIS_API_KEY: ${{ secrets.DOUBLE_GIS_API_KEY }}
+        run: |
+          docker compose -f docker-compose.prod.yml build
+          docker compose -f docker-compose.prod.yml up -d
