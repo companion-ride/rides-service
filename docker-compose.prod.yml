@@ -23,6 +23,9 @@ services:
       DROPOFF_RADIUS_M: ${DROPOFF_RADIUS_M}
       MIN_ETA_SECONDS: ${MIN_ETA_SECONDS}
       DOUBLE_GIS_API_KEY: ${DOUBLE_GIS_API_KEY}
+      GATEWAY_URL: ${GATEWAY_URL}
+      GATEWAY_SECRET: ${GATEWAY_SECRET}
+      SERVICE_HOST: ${SERVICE_HOST}
     networks:
       - blueprint
       - pathfinder_blueprint
