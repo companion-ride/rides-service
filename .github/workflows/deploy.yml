@@ -28,5 +28,7 @@ jobs:
           MIN_ETA_SECONDS: ${{ secrets.MIN_ETA_SECONDS }}
           DOUBLE_GIS_API_KEY: ${{ secrets.DOUBLE_GIS_API_KEY }}
         run: |
+          docker network create blueprint 2>/dev/null || true
+          docker network create pathfinder_blueprint 2>/dev/null || true
           docker compose -f docker-compose.prod.yml build
           docker compose -f docker-compose.prod.yml up -d
