@@ -27,6 +27,9 @@ jobs:
           DROPOFF_RADIUS_M: ${{ secrets.DROPOFF_RADIUS_M }}
           MIN_ETA_SECONDS: ${{ secrets.MIN_ETA_SECONDS }}
           DOUBLE_GIS_API_KEY: ${{ secrets.DOUBLE_GIS_API_KEY }}
+          GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
+          GATEWAY_SECRET: ${{ secrets.GATEWAY_SECRET }}
+          SERVICE_HOST: ${{ secrets.SERVICE_HOST }}
         run: |
           docker network create blueprint 2>/dev/null || true
           docker network create pathfinder_blueprint 2>/dev/null || true
