@@ -14,6 +14,7 @@ WORKDIR /app
 COPY --from=build /app/main /app/main
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/web /app/web
+COPY --from=build /app/docs /app/docs
 EXPOSE ${PORT}
 CMD ["./main"]
 

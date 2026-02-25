@@ -254,9 +254,16 @@ func parseDuration(s string) int {
 }
 
 func (s *Server) SwaggerJSONHandler(c *gin.Context) {
-	data, _ := os.ReadFile("./docs/swagger.json")
+	data, err := os.ReadFile("./docs/swagger.json")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "swagger spec not found"})
+		return
+	}
 	var spec map[string]any
-	json.Unmarshal(data, &spec)
+	if err := json.Unmarshal(data, &spec); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid swagger spec"})
+		return
+	}
 	if h := os.Getenv("SWAGGER_HOST"); h != "" {
 		spec["host"] = h
 	}
