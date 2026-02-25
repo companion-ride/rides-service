@@ -1,0 +1,241 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Ride-matching service — creates driver rides and matches passengers to nearby routes.",
+        "title": "Rides API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8081",
+    "basePath": "/",
+    "paths": {
+        "/": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["system"],
+                "summary": "Hello World",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["system"],
+                "summary": "DB health check",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {}
+                        }
+                    }
+                }
+            }
+        },
+        "/api/config": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["system"],
+                "summary": "Frontend config",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "map_api_key": {"type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/route/{id}": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["routes"],
+                "summary": "Get route from pathfinder",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Route ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {}
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {"type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/rides": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["rides"],
+                "summary": "List active rides",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "ride_id":    {"type": "string"},
+                                    "route_id":   {"type": "string"},
+                                    "start_lat":  {"type": "number"},
+                                    "start_lon":  {"type": "number"},
+                                    "finish_lat": {"type": "number"},
+                                    "finish_lon": {"type": "number"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ride/driver/path": {
+            "post": {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["rides"],
+                "summary": "Create driver ride",
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {"$ref": "#/definitions/CreateDriverPathRequest"}
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {"$ref": "#/definitions/CreateDriverPathResponse"}
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/ride/passenger/match": {
+            "post": {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["rides"],
+                "summary": "Match passenger to ride",
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {"$ref": "#/definitions/MatchPassengerRequest"}
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {"$ref": "#/definitions/MatchPassengerResponse"}
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "Coord": {
+            "type": "object",
+            "required": ["lat", "lon"],
+            "properties": {
+                "lat": {"type": "number"},
+                "lon": {"type": "number"}
+            }
+        },
+        "CreateDriverPathRequest": {
+            "type": "object",
+            "required": ["driver_id", "start", "finish"],
+            "properties": {
+                "driver_id": {"type": "string", "format": "uuid"},
+                "start":     {"$ref": "#/definitions/Coord"},
+                "finish":    {"$ref": "#/definitions/Coord"}
+            }
+        },
+        "CreateDriverPathResponse": {
+            "type": "object",
+            "properties": {
+                "ride_id":  {"type": "string"},
+                "route_id": {"type": "string"},
+                "status":   {"type": "string"}
+            }
+        },
+        "MatchPassengerRequest": {
+            "type": "object",
+            "required": ["passenger_id", "pickup", "dropoff"],
+            "properties": {
+                "passenger_id": {"type": "string", "format": "uuid"},
+                "pickup":       {"$ref": "#/definitions/Coord"},
+                "dropoff":      {"$ref": "#/definitions/Coord"}
+            }
+        },
+        "WalkPath": {
+            "type": "object",
+            "properties": {
+                "geometry":      {"type": "array", "items": {"$ref": "#/definitions/Coord"}},
+                "walk_distance": {"type": "string"},
+                "walk_duration": {"type": "string"}
+            }
+        },
+        "MatchPassengerResponse": {
+            "type": "object",
+            "properties": {
+                "sub_ride_id":    {"type": "string"},
+                "ride_id":        {"type": "string"},
+                "driver_id":      {"type": "string"},
+                "pickup_point":   {"$ref": "#/definitions/Coord"},
+                "dropoff_point":  {"$ref": "#/definitions/Coord"},
+                "pickup_walk_m":  {"type": "number"},
+                "dropoff_walk_m": {"type": "number"},
+                "total_walk_m":   {"type": "number"},
+                "walk_to_pickup": {"$ref": "#/definitions/WalkPath"}
+            }
+        }
+    }
+}

@@ -30,6 +30,8 @@ jobs:
           GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
           GATEWAY_SECRET: ${{ secrets.GATEWAY_SECRET }}
           SERVICE_HOST: ${{ secrets.SERVICE_HOST }}
+          SWAGGER_HOST: ${{ secrets.SWAGGER_HOST }}
+          SWAGGER_BASE_PATH: ${{ secrets.SWAGGER_BASE_PATH }}
         run: |
           docker network create blueprint 2>/dev/null || true
           docker network create pathfinder_blueprint 2>/dev/null || true

@@ -73,7 +73,7 @@
     <div id="map"></div>
     <div id="panel">
         <h2>Driver - Create Ride</h2>
-        <div class="nav"><a href="/passenger">Go to Passenger page &rarr;</a></div>
+        <div class="nav"><a id="nav-passenger" href="/passenger">Go to Passenger page &rarr;</a></div>
         <div id="status">Click on the map to set Start (A)</div>
         <div id="error"></div>
 
@@ -100,6 +100,9 @@
 
     <script src="https://mapgl.2gis.com/api/js/v1"></script>
     <script>
+        const BASE = window.location.pathname.replace(/\/driver$/, '');
+        document.getElementById('nav-passenger').href = BASE + '/passenger';
+
         const ROUTE_COLORS = ['#1a73e8', '#ea4335', '#34a853', '#fa7b17', '#9C27B0', '#00BCD4', '#FF5722', '#795548'];
         let colorIndex = 0;
 
@@ -163,7 +166,7 @@
             document.getElementById('panel').classList.add('loading');
 
             try {
-                const resp = await fetch('/ride/driver/path', {
+                const resp = await fetch(BASE + '/ride/driver/path', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -183,7 +186,7 @@
                 colorIndex++;
 
                 // Fetch route geometry to draw on map
-                const routeResp = await fetch(`/api/route/${data.route_id}`);
+                const routeResp = await fetch(BASE + `/api/route/${data.route_id}`);
                 if (!routeResp.ok) throw new Error('Failed to fetch route geometry');
                 const routeData = await routeResp.json();
 
@@ -226,7 +229,7 @@
         }
 
         async function initMap() {
-            const configResp = await fetch('/api/config');
+            const configResp = await fetch(BASE + '/api/config');
             const config = await configResp.json();
 
             map = new mapgl.Map('map', {

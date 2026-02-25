@@ -84,7 +84,7 @@
     <div id="map"></div>
     <div id="panel">
         <h2>Passenger - Find Ride</h2>
-        <div class="nav"><a href="/driver">&larr; Go to Driver page</a></div>
+        <div class="nav"><a id="nav-driver" href="/driver">&larr; Go to Driver page</a></div>
         <div id="status">Click on the map to set Pickup</div>
         <div id="error"></div>
 
@@ -111,6 +111,9 @@
 
     <script src="https://mapgl.2gis.com/api/js/v1"></script>
     <script>
+        const BASE = window.location.pathname.replace(/\/passenger$/, '');
+        document.getElementById('nav-driver').href = BASE + '/driver';
+
         const ROUTE_COLORS = ['#1a73e8', '#ea4335', '#34a853', '#fa7b17', '#9C27B0', '#00BCD4', '#FF5722', '#795548'];
 
         let map, markerPickup, markerDropoff, markerPickupProj, markerDropoffProj;
@@ -167,7 +170,7 @@
             document.getElementById('panel').classList.add('loading');
 
             try {
-                const resp = await fetch('/ride/passenger/match', {
+                const resp = await fetch(BASE + '/ride/passenger/match', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -264,7 +267,7 @@
         }
 
         async function initMap() {
-            const configResp = await fetch('/api/config');
+            const configResp = await fetch(BASE + '/api/config');
             const config = await configResp.json();
 
             map = new mapgl.Map('map', {
@@ -309,7 +312,7 @@
 
         async function loadDriverRides() {
             try {
-                const resp = await fetch('/api/rides');
+                const resp = await fetch(BASE + '/api/rides');
                 if (!resp.ok) return;
                 const rides = await resp.json();
                 if (!rides || !rides.length) return;
@@ -318,7 +321,7 @@
                     const ride = rides[i];
                     const color = ROUTE_COLORS[i % ROUTE_COLORS.length];
                     try {
-                        const routeResp = await fetch(`/api/route/${ride.route_id}`);
+                        const routeResp = await fetch(BASE + `/api/route/${ride.route_id}`);
                         if (!routeResp.ok) continue;
                         const routeData = await routeResp.json();
                         for (const seg of routeData.segments) {

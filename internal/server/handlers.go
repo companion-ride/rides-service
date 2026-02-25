@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -249,4 +251,17 @@ func parseDuration(s string) int {
 		return mins * 60
 	}
 	return 0
+}
+
+func (s *Server) SwaggerJSONHandler(c *gin.Context) {
+	data, _ := os.ReadFile("./docs/swagger.json")
+	var spec map[string]any
+	json.Unmarshal(data, &spec)
+	if h := os.Getenv("SWAGGER_HOST"); h != "" {
+		spec["host"] = h
+	}
+	if bp := os.Getenv("SWAGGER_BASE_PATH"); bp != "" {
+		spec["basePath"] = bp
+	}
+	c.JSON(http.StatusOK, spec)
 }
