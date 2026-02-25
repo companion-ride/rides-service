@@ -112,9 +112,16 @@ func main() {
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&search_path=%s",
 		cfg.DBUsername, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBDatabase, cfg.DBSchema)
 
+	// Ensure schema exists before running migrations
+	if cfg.DBSchema != "" {
+		if err := database.EnsureSchema(connStr, cfg.DBSchema); err != nil {
+			log.Fatalf("failed to ensure schema %q: %v", cfg.DBSchema, err)
+		}
+	}
+
 	// Run database migrations
 	if err := database.RunMigrations(connStr, "migrations"); err != nil {
-		log.Printf("migration warning: %v", err)
+		log.Fatalf("migration failed: %v", err)
 	}
 
 	db := database.New(connStr)

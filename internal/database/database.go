@@ -149,6 +149,20 @@ func (s *service) Close() error {
 	return s.db.Close()
 }
 
+// EnsureSchema creates the given schema if it does not already exist.
+// Must be called before RunMigrations when using a non-public search_path.
+func EnsureSchema(connStr, schema string) error {
+	db, err := sql.Open("pgx", connStr)
+	if err != nil {
+		return fmt.Errorf("opening db for schema creation: %w", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS "` + schema + `"`); err != nil {
+		return fmt.Errorf("creating schema %q: %w", schema, err)
+	}
+	return nil
+}
+
 func (s *service) CreateRide(ctx context.Context, ride *Ride) error {
 	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, status)
