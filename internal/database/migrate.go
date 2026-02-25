@@ -33,7 +33,7 @@ func RunMigrations(connStr, migrationsPath string) error {
 		if errors.As(err, &dirtyErr) {
 			// A previous migration attempt failed mid-way. Reset to the last
 			// clean version and retry so the migration runs from scratch.
-			if forceErr := m.Force(dirtyErr.Version - 1); forceErr != nil {
+			if forceErr := m.Force(-1); forceErr != nil {
 				return fmt.Errorf("forcing version after dirty state: %w", forceErr)
 			}
 			if retryErr := m.Up(); retryErr != nil && retryErr != migrate.ErrNoChange {
