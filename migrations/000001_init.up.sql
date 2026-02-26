@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS rides (
     updated_at TIMESTAMP DEFAULT now()
 );
 
-CREATE INDEX idx_rides_geometry ON rides USING GIST (geometry);
-CREATE INDEX idx_rides_status ON rides (status);
+CREATE INDEX IF NOT EXISTS idx_rides_geometry ON rides USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_rides_status ON rides (status);
 
 CREATE TABLE IF NOT EXISTS sub_rides (
     sub_ride_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -37,5 +37,5 @@ CREATE TABLE IF NOT EXISTS sub_rides (
     updated_at TIMESTAMP DEFAULT now()
 );
 
-CREATE INDEX idx_sub_rides_ride_id ON sub_rides (ride_id);
-CREATE INDEX idx_sub_rides_passenger_id ON sub_rides (passenger_id);
+CREATE INDEX IF NOT EXISTS idx_sub_rides_ride_id ON sub_rides (ride_id);
+CREATE INDEX IF NOT EXISTS idx_sub_rides_passenger_id ON sub_rides (passenger_id);
