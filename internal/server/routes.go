@@ -24,9 +24,11 @@ func (s *Server) RegisterRoutes() http.Handler {
 	r.StaticFile("/passenger", "./web/passenger.html")
 	r.StaticFile("/docs", "./web/swagger.html")
 	r.GET("/docs/swagger.json", s.SwaggerJSONHandler)
-	r.GET("/api/config", s.ConfigHandler)
-	r.GET("/api/route/:id", s.GetRouteHandler)
-	r.GET("/api/rides", s.ListRidesHandler)
+	r.GET("/config", s.ConfigHandler)
+	r.GET("/route/:id", s.GetRouteHandler)
+	r.GET("/rides", s.ListRidesHandler)
+
+	r.POST("/driver/location", s.SetDriverLocationHandler)
 
 	ride := r.Group("/ride")
 	{

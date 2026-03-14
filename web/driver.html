@@ -85,6 +85,7 @@
         <div>
             <button id="createBtn" disabled onclick="createRide()">Create Ride</button>
             <button class="secondary" onclick="resetMarkers()">Reset</button>
+            <button id="posBtn" class="secondary" onclick="startSetPosition()">Set My Position</button>
         </div>
 
         <table id="rides-table">
@@ -95,6 +96,7 @@
         <div class="legend">
             <div><span class="dot green"></span> Start (A)</div>
             <div><span class="dot red"></span> Finish (B)</div>
+            <div><span class="dot" style="background:#1a73e8"></span> My Position</div>
         </div>
     </div>
 
@@ -106,8 +108,9 @@
         const ROUTE_COLORS = ['#1a73e8', '#ea4335', '#34a853', '#fa7b17', '#9C27B0', '#00BCD4', '#FF5722', '#795548'];
         let colorIndex = 0;
 
-        let map, markerA, markerB;
+        let map, markerA, markerB, positionMarker;
         let step = 1; // 1=set A, 2=set B
+        let settingPosition = false;
         let rides = []; // {ride_id, driver_id, route_id, color, polylines[]}
         let allPolylines = [];
 
@@ -134,9 +137,46 @@
             if (markerA) { markerA.destroy(); markerA = null; }
             if (markerB) { markerB.destroy(); markerB = null; }
             step = 1;
+            settingPosition = false;
             document.getElementById('createBtn').disabled = true;
             showError('');
             setStatus('Click on the map to set Start (A)');
+        }
+
+        function startSetPosition() {
+            const driverId = document.getElementById('driverId').value.trim();
+            if (!driverId) { showError('Driver ID is required'); return; }
+            settingPosition = true;
+            showError('');
+            setStatus('Click on the map to set your position');
+        }
+
+        async function setDriverPosition(coords) {
+            const driverId = document.getElementById('driverId').value.trim();
+            settingPosition = false;
+
+            if (positionMarker) { positionMarker.destroy(); }
+            positionMarker = new mapgl.Marker(map, {
+                coordinates: coords,
+                icon: markerIcon('#1a73e8'),
+            });
+
+            setStatus('Setting position...');
+            try {
+                const resp = await fetch(BASE + '/driver/location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ driver_id: driverId, lat: coords[1], lon: coords[0] }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || `HTTP ${resp.status}`);
+                }
+                setStatus('Position set! Click map to set Start (A)');
+            } catch (err) {
+                showError('Failed to set position: ' + err.message);
+                setStatus('Click on the map to set Start (A)');
+            }
         }
 
         function updateRidesTable() {
@@ -186,7 +226,7 @@
                 colorIndex++;
 
                 // Fetch route geometry to draw on map
-                const routeResp = await fetch(BASE + `/api/route/${data.route_id}`);
+                const routeResp = await fetch(BASE + `/route/${data.route_id}`);
                 if (!routeResp.ok) throw new Error('Failed to fetch route geometry');
                 const routeData = await routeResp.json();
 
@@ -229,7 +269,7 @@
         }
 
         async function initMap() {
-            const configResp = await fetch(BASE + '/api/config');
+            const configResp = await fetch(BASE + '/config');
             const config = await configResp.json();
 
             map = new mapgl.Map('map', {
@@ -240,6 +280,11 @@
 
             map.on('click', (e) => {
                 const coords = e.lngLat;
+
+                if (settingPosition) {
+                    setDriverPosition(coords);
+                    return;
+                }
 
                 if (step === 1) {
                     showError('');

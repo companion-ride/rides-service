@@ -267,7 +267,7 @@
         }
 
         async function initMap() {
-            const configResp = await fetch(BASE + '/api/config');
+            const configResp = await fetch(BASE + '/config');
             const config = await configResp.json();
 
             map = new mapgl.Map('map', {
@@ -312,7 +312,7 @@
 
         async function loadDriverRides() {
             try {
-                const resp = await fetch(BASE + '/api/rides');
+                const resp = await fetch(BASE + '/rides');
                 if (!resp.ok) return;
                 const rides = await resp.json();
                 if (!rides || !rides.length) return;
@@ -321,7 +321,7 @@
                     const ride = rides[i];
                     const color = ROUTE_COLORS[i % ROUTE_COLORS.length];
                     try {
-                        const routeResp = await fetch(BASE + `/api/route/${ride.route_id}`);
+                        const routeResp = await fetch(BASE + `/route/${ride.route_id}`);
                         if (!routeResp.ok) continue;
                         const routeData = await routeResp.json();
                         for (const seg of routeData.segments) {

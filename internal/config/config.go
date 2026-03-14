@@ -22,6 +22,7 @@ type Config struct {
 	PickupRadiusM      float64
 	DropoffRadiusM     float64
 	MinETASeconds      int
+	MinDriverDistanceM float64
 }
 
 func Load() *Config {
@@ -30,6 +31,7 @@ func Load() *Config {
 	pickupRadius := envFloatOrDefault("PICKUP_RADIUS_M", 500)
 	dropoffRadius := envFloatOrDefault("DROPOFF_RADIUS_M", 500)
 	minETA := envIntOrDefault("MIN_ETA_SECONDS", 180)
+	minDriverDist := envFloatOrDefault("MIN_DRIVER_DISTANCE_M", 2000)
 
 	return &Config{
 		Port:               port,
@@ -46,6 +48,7 @@ func Load() *Config {
 		PickupRadiusM:      pickupRadius,
 		DropoffRadiusM:     dropoffRadius,
 		MinETASeconds:      minETA,
+		MinDriverDistanceM: minDriverDist,
 	}
 }
 

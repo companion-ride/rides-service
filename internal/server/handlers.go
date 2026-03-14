@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,16 @@ import (
 	"rides/internal/database"
 	"rides/internal/pathfinder"
 )
+
+func haversine(lat1, lon1, lat2, lon2 float64) float64 {
+	const R = 6371000 // Earth radius in meters
+	dLat := (lat2 - lat1) * math.Pi / 180
+	dLon := (lon2 - lon1) * math.Pi / 180
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*math.Pi/180)*math.Cos(lat2*math.Pi/180)*
+			math.Sin(dLon/2)*math.Sin(dLon/2)
+	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+}
 
 func (s *Server) ConfigHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"map_api_key": s.cfg.DoubleGISAPIKey})
@@ -139,6 +150,16 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 			continue
 		}
 
+		// Distance check: skip if driver is too close to pickup
+		loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
+		if locErr == nil {
+			dist := haversine(loc.Lat, loc.Lon, req.Pickup.Lat, req.Pickup.Lon)
+			if dist < s.cfg.MinDriverDistanceM {
+				log.Printf("driver %s too close (%.0fm < %.0fm), skipping", cand.DriverID, dist, s.cfg.MinDriverDistanceM)
+				continue
+			}
+		}
+
 		if cand.Status == "active" {
 			if !s.checkETA(c, cand) {
 				continue
@@ -251,6 +272,22 @@ func parseDuration(s string) int {
 		return mins * 60
 	}
 	return 0
+}
+
+func (s *Server) SetDriverLocationHandler(c *gin.Context) {
+	var req SetDriverLocationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, req.Lat, req.Lon); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to set location: " + err.Error()})
+		log.Printf("set driver location error: %v", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (s *Server) SwaggerJSONHandler(c *gin.Context) {
