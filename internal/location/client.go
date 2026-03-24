@@ -52,6 +52,11 @@ func (c *Client) GetCurrentLocation(ctx context.Context, userID string) (*Locati
 	return &loc, nil
 }
 
+// ProxyRequest executes an arbitrary HTTP request through the client's transport.
+func (c *Client) ProxyRequest(req *http.Request) (*http.Response, error) {
+	return c.httpClient.Do(req)
+}
+
 func (c *Client) SetLocation(ctx context.Context, userID string, lat, lon float64) error {
 	body, err := json.Marshal(map[string]any{
 		"user_id":   userID,
