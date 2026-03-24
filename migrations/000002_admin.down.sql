@@ -1,0 +1,13 @@
+ALTER TABLE rides DROP COLUMN IF EXISTS price;
+ALTER TABLE rides DROP COLUMN IF EXISTS distance_m;
+ALTER TABLE rides DROP COLUMN IF EXISTS from_address;
+ALTER TABLE rides DROP COLUMN IF EXISTS to_address;
+ALTER TABLE rides DROP COLUMN IF EXISTS payment_method;
+ALTER TABLE rides DROP COLUMN IF EXISTS completed_at;
+ALTER TABLE rides DROP COLUMN IF EXISTS cancelled_at;
+ALTER TABLE sub_rides DROP COLUMN IF EXISTS completed_at;
+ALTER TABLE sub_rides DROP COLUMN IF EXISTS cancelled_at;
+DROP INDEX IF EXISTS idx_rides_status_created;
+DROP INDEX IF EXISTS idx_sub_rides_ride_id_status;
+CREATE INDEX IF NOT EXISTS idx_rides_status ON rides (status);
+DROP TABLE IF EXISTS admin_settings;
