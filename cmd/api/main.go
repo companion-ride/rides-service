@@ -85,7 +85,7 @@ func ResolveService(name string) string {
 	return fmt.Sprintf("http://%s:%d", result.Address, result.Port)
 }
 
-func gracefulShutdown(apiServer *http.Server, done chan bool) {
+func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, done chan bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -94,6 +94,7 @@ func gracefulShutdown(apiServer *http.Server, done chan bool) {
 	log.Println("shutting down gracefully, press Ctrl+C again to force")
 	stop()
 
+	reloadCancel()
 	deregisterFromGateway()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -126,12 +127,39 @@ func main() {
 
 	db := database.New(connStr)
 
-	srv := server.NewServer(cfg, db)
+	// Initialize matching params from DB, falling back to env var defaults
+	defaults := config.DefaultMatchingParams()
+	mpLoader := config.NewMatchingParamsLoader(defaults)
+
+	// Try to load from DB (ignore error on first run — table may not exist yet)
+	ctx := context.Background()
+	if raw, err := db.GetMatchingParams(ctx); err == nil && raw != nil && string(raw) != "{}" {
+		var p config.MatchingParams
+		if err := json.Unmarshal(raw, &p); err == nil && p.MaxPassengers > 0 {
+			mpLoader.Store(&p)
+		}
+	}
+
+	// Start background reload (every 2 minutes)
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	mpLoader.StartPeriodicReload(reloadCtx, 2*time.Minute, func(ctx context.Context) (*config.MatchingParams, error) {
+		raw, err := db.GetMatchingParams(ctx)
+		if err != nil || raw == nil {
+			return nil, err
+		}
+		var p config.MatchingParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	})
+
+	srv := server.NewServer(cfg, db, mpLoader)
 
 	registerWithGateway(cfg.Port)
 
 	done := make(chan bool, 1)
-	go gracefulShutdown(srv, done)
+	go gracefulShutdown(srv, reloadCancel, done)
 
 	log.Printf("Starting rides service on port %d", cfg.Port)
 	err := srv.ListenAndServe()

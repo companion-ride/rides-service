@@ -133,13 +133,15 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		return
 	}
 
+	mp := s.matchingParams.Get()
+
 	candidates, err := s.db.FindMatchingRides(c.Request.Context(), database.MatchParams{
 		PickupLon:     req.Pickup.Lon,
 		PickupLat:     req.Pickup.Lat,
 		DropoffLon:    req.Dropoff.Lon,
 		DropoffLat:    req.Dropoff.Lat,
-		PickupRadius:  s.cfg.PickupRadiusM,
-		DropoffRadius: s.cfg.DropoffRadiusM,
+		PickupRadius:  mp.PickupRadiusM,
+		DropoffRadius: mp.DropoffRadiusM,
 		MaxResults:    10,
 	})
 	if err != nil {
@@ -157,7 +159,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 			log.Printf("count sub-rides error: %v", err)
 			continue
 		}
-		if count >= s.cfg.MaxPassengers {
+		if count >= mp.MaxPassengers {
 			continue
 		}
 
@@ -165,8 +167,8 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
 		if locErr == nil {
 			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
-			if dist < s.cfg.MinDriverDistanceM {
-				log.Printf("driver %s too close (%.0fm < %.0fm), skipping", cand.DriverID, dist, s.cfg.MinDriverDistanceM)
+			if dist < mp.MinDriverDistanceM {
+				log.Printf("driver %s too close (%.0fm < %.0fm), skipping", cand.DriverID, dist, mp.MinDriverDistanceM)
 				continue
 			}
 
@@ -179,9 +181,9 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 					continue
 				}
 				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
-				if etaSeconds < float64(s.cfg.MinETASeconds) {
+				if etaSeconds < float64(mp.MinETASeconds) {
 					log.Printf("driver %s ETA too short (%.0fs < %ds), skipping",
-						cand.DriverID, etaSeconds, s.cfg.MinETASeconds)
+						cand.DriverID, etaSeconds, mp.MinETASeconds)
 					continue
 				}
 			}
