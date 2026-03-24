@@ -69,6 +69,57 @@ type MatchResult struct {
 	DropoffPointLon float64
 }
 
+type AdminListParams struct {
+	Status string
+	Search string
+	Limit  int
+	Offset int
+}
+
+type AdminRideRow struct {
+	RideID        string
+	DriverID      string
+	RouteID       string
+	FromAddress   *string
+	ToAddress     *string
+	Status        string
+	Price         *int
+	DistanceM     *int
+	TotalDuration int
+	PaymentMethod *string
+	Passengers    int
+	StartLat      float64
+	StartLon      float64
+	FinishLat     float64
+	FinishLon     float64
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+	CancelledAt   *time.Time
+	CreatedAt     time.Time
+}
+
+type AdminSubRideRow struct {
+	SubRideID   string
+	PassengerID string
+	PickupLat   float64
+	PickupLon   float64
+	DropoffLat  float64
+	DropoffLon  float64
+	Status      string
+	CompletedAt *time.Time
+	CancelledAt *time.Time
+	CreatedAt   time.Time
+}
+
+type MatchingStats struct {
+	TotalRides     int
+	RidesByStatus  map[string]int
+	MatchedRides   int
+	TotalSubRides  int
+	AvgWaitSeconds float64
+	CancelledRides int
+}
+
 type Service interface {
 	Health() map[string]string
 	Close() error
@@ -89,6 +140,9 @@ type Service interface {
 	UpsertAdminSettings(ctx context.Context, settings json.RawMessage) error
 	GetMatchingParams(ctx context.Context) (json.RawMessage, error)
 	UpsertMatchingParams(ctx context.Context, params json.RawMessage) error
+	ListAdminRides(ctx context.Context, params AdminListParams) ([]AdminRideRow, int, error)
+	GetAdminRideDetail(ctx context.Context, rideID string) (*AdminRideRow, []AdminSubRideRow, error)
+	GetMatchingStats(ctx context.Context) (*MatchingStats, error)
 }
 
 type service struct {
@@ -366,4 +420,134 @@ func (s *service) UpsertMatchingParams(ctx context.Context, params json.RawMessa
 		params,
 	)
 	return err
+}
+
+func (s *service) ListAdminRides(ctx context.Context, params AdminListParams) ([]AdminRideRow, int, error) {
+	countQuery := `SELECT COUNT(*) FROM rides WHERE ($1 = '' OR status = $1)
+		AND ($2 = '' OR ride_id::text LIKE $2 || '%' OR driver_id::text LIKE $2 || '%')`
+	var total int
+	if err := s.db.QueryRowContext(ctx, countQuery, params.Status, params.Search).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting admin rides: %w", err)
+	}
+
+	query := `SELECT r.ride_id, r.driver_id, r.route_id, r.from_address, r.to_address,
+		r.status, r.price, r.distance_m, r.total_duration, r.payment_method,
+		COALESCE(sr.cnt, 0), r.created_at
+		FROM rides r
+		LEFT JOIN (
+			SELECT ride_id, COUNT(*) AS cnt
+			FROM sub_rides WHERE status IN ('pending', 'active', 'completed')
+			GROUP BY ride_id
+		) sr ON sr.ride_id = r.ride_id
+		WHERE ($1 = '' OR r.status = $1)
+		  AND ($2 = '' OR r.ride_id::text LIKE $2 || '%' OR r.driver_id::text LIKE $2 || '%')
+		ORDER BY r.created_at DESC
+		LIMIT $3 OFFSET $4`
+
+	rows, err := s.db.QueryContext(ctx, query, params.Status, params.Search, params.Limit, params.Offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing admin rides: %w", err)
+	}
+	defer rows.Close()
+
+	var rides []AdminRideRow
+	for rows.Next() {
+		var r AdminRideRow
+		if err := rows.Scan(&r.RideID, &r.DriverID, &r.RouteID, &r.FromAddress, &r.ToAddress,
+			&r.Status, &r.Price, &r.DistanceM, &r.TotalDuration, &r.PaymentMethod,
+			&r.Passengers, &r.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scanning admin ride: %w", err)
+		}
+		rides = append(rides, r)
+	}
+	return rides, total, rows.Err()
+}
+
+func (s *service) GetAdminRideDetail(ctx context.Context, rideID string) (*AdminRideRow, []AdminSubRideRow, error) {
+	var r AdminRideRow
+	err := s.db.QueryRowContext(ctx,
+		`SELECT ride_id, driver_id, route_id, from_address, to_address,
+		        status, price, distance_m, total_duration, payment_method,
+		        start_lat, start_lon, finish_lat, finish_lon,
+		        started_at, completed_at, cancelled_at, created_at
+		 FROM rides WHERE ride_id = $1`,
+		rideID,
+	).Scan(&r.RideID, &r.DriverID, &r.RouteID, &r.FromAddress, &r.ToAddress,
+		&r.Status, &r.Price, &r.DistanceM, &r.TotalDuration, &r.PaymentMethod,
+		&r.StartLat, &r.StartLon, &r.FinishLat, &r.FinishLon,
+		&r.StartedAt, &r.CompletedAt, &r.CancelledAt, &r.CreatedAt)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sub_ride_id, passenger_id, pickup_lat, pickup_lon, dropoff_lat, dropoff_lon,
+		        status, completed_at, cancelled_at, created_at
+		 FROM sub_rides WHERE ride_id = $1 ORDER BY created_at`,
+		rideID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing sub_rides: %w", err)
+	}
+	defer rows.Close()
+
+	var subs []AdminSubRideRow
+	for rows.Next() {
+		var sr AdminSubRideRow
+		if err := rows.Scan(&sr.SubRideID, &sr.PassengerID,
+			&sr.PickupLat, &sr.PickupLon, &sr.DropoffLat, &sr.DropoffLon,
+			&sr.Status, &sr.CompletedAt, &sr.CancelledAt, &sr.CreatedAt); err != nil {
+			return nil, nil, fmt.Errorf("scanning sub_ride: %w", err)
+		}
+		subs = append(subs, sr)
+	}
+	return &r, subs, rows.Err()
+}
+
+func (s *service) GetMatchingStats(ctx context.Context) (*MatchingStats, error) {
+	stats := &MatchingStats{
+		RidesByStatus: make(map[string]int),
+	}
+
+	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM rides GROUP BY status`)
+	if err != nil {
+		return nil, fmt.Errorf("querying ride status counts: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		stats.RidesByStatus[status] = count
+		stats.TotalRides += count
+		if status == "cancelled" {
+			stats.CancelledRides = count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT ride_id), COUNT(*) FROM sub_rides`,
+	).Scan(&stats.MatchedRides, &stats.TotalSubRides)
+	if err != nil {
+		return nil, fmt.Errorf("querying sub_ride stats: %w", err)
+	}
+
+	var avgWait *float64
+	err = s.db.QueryRowContext(ctx,
+		`SELECT EXTRACT(EPOCH FROM AVG(started_at - created_at))
+		 FROM rides WHERE started_at IS NOT NULL`,
+	).Scan(&avgWait)
+	if err != nil {
+		return nil, fmt.Errorf("querying avg wait: %w", err)
+	}
+	if avgWait != nil {
+		stats.AvgWaitSeconds = *avgWait
+	}
+
+	return stats, nil
 }
