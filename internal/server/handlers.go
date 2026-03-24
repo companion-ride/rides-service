@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"rides/internal/auth"
 	"rides/internal/database"
 	"rides/internal/pathfinder"
 )
@@ -72,6 +73,11 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 		return
 	}
 
+	if req.DriverID != auth.GetUserID(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user ID mismatch"})
+		return
+	}
+
 	// Call pathfinder to create the driving route
 	routeResp, err := s.pathfinder.CreateRoute(c.Request.Context(),
 		req.Start.Lat, req.Start.Lon, req.Finish.Lat, req.Finish.Lon,
@@ -122,6 +128,11 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		return
 	}
 
+	if req.PassengerID != auth.GetUserID(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user ID mismatch"})
+		return
+	}
+
 	candidates, err := s.db.FindMatchingRides(c.Request.Context(), database.MatchParams{
 		PickupLon:     req.Pickup.Lon,
 		PickupLat:     req.Pickup.Lat,
@@ -153,16 +164,26 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		// Distance check: skip if driver is too close to pickup
 		loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
 		if locErr == nil {
-			dist := haversine(loc.Lat, loc.Lon, req.Pickup.Lat, req.Pickup.Lon)
+			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
 			if dist < s.cfg.MinDriverDistanceM {
 				log.Printf("driver %s too close (%.0fm < %.0fm), skipping", cand.DriverID, dist, s.cfg.MinDriverDistanceM)
 				continue
 			}
-		}
 
-		if cand.Status == "active" {
-			if !s.checkETA(c, cand) {
-				continue
+			// Route-based check: has driver already passed the pickup?
+			driverFrac, fracErr := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
+			if fracErr == nil {
+				if driverFrac >= cand.PickupFrac {
+					log.Printf("driver %s already passed pickup (frac %.3f >= %.3f), skipping",
+						cand.DriverID, driverFrac, cand.PickupFrac)
+					continue
+				}
+				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
+				if etaSeconds < float64(s.cfg.MinETASeconds) {
+					log.Printf("driver %s ETA too short (%.0fs < %ds), skipping",
+						cand.DriverID, etaSeconds, s.cfg.MinETASeconds)
+					continue
+				}
 			}
 		}
 
@@ -227,26 +248,6 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 	})
 }
 
-func (s *Server) checkETA(c *gin.Context, cand *database.MatchResult) bool {
-	loc, err := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
-	if err != nil {
-		log.Printf("location service error (skipping ETA check): %v", err)
-		return true
-	}
-
-	driverFrac, err := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
-	if err != nil {
-		log.Printf("driver fraction query error: %v", err)
-		return true
-	}
-
-	if driverFrac >= cand.PickupFrac {
-		return false
-	}
-
-	etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
-	return etaSeconds >= float64(s.cfg.MinETASeconds)
-}
 
 func segmentsToWKT(segments []pathfinder.Segment) string {
 	var points []string
@@ -278,6 +279,11 @@ func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 	var req SetDriverLocationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.DriverID != auth.GetUserID(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user ID mismatch"})
 		return
 	}
 
