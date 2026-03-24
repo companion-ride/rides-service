@@ -12,6 +12,13 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+const (
+	StatusPending   = "pending"
+	StatusActive    = "active"
+	StatusCompleted = "completed"
+	StatusCancelled = "cancelled"
+)
+
 type Ride struct {
 	RideID        string
 	DriverID      string
@@ -522,7 +529,7 @@ func (s *service) GetMatchingStats(ctx context.Context) (*MatchingStats, error) 
 		}
 		stats.RidesByStatus[status] = count
 		stats.TotalRides += count
-		if status == "cancelled" {
+		if status == StatusCancelled {
 			stats.CancelledRides = count
 		}
 	}
