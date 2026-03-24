@@ -39,6 +39,18 @@ func (s *Server) RegisterRoutes() http.Handler {
 	protectedRide.POST("/driver/path", s.CreateDriverPathHandler)
 	protectedRide.POST("/passenger/match", s.MatchPassengerHandler)
 
+	// Admin routes (JWT + admin role required)
+	admin := protected.Group("/admin")
+	admin.Use(auth.RequireRole("admin"))
+	admin.GET("/rides", s.AdminListRidesHandler)
+	admin.GET("/rides/:id", s.AdminGetRideHandler)
+	admin.GET("/matching/stats", s.AdminMatchingStatsHandler)
+	admin.GET("/matching/params", s.AdminGetMatchingParamsHandler)
+	admin.PUT("/matching/params", s.AdminUpdateMatchingParamsHandler)
+	admin.GET("/settings", s.AdminGetSettingsHandler)
+	admin.PUT("/settings", s.AdminUpdateSettingsHandler)
+	admin.GET("/drivers/active", s.AdminActiveDriversHandler)
+
 	return r
 }
 
