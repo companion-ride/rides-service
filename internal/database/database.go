@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -82,6 +83,12 @@ type Service interface {
 	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
 	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
 	ListActiveRides(ctx context.Context) ([]Ride, error)
+
+	// Admin queries
+	GetAdminSettings(ctx context.Context) (json.RawMessage, error)
+	UpsertAdminSettings(ctx context.Context, settings json.RawMessage) error
+	GetMatchingParams(ctx context.Context) (json.RawMessage, error)
+	UpsertMatchingParams(ctx context.Context, params json.RawMessage) error
 }
 
 type service struct {
@@ -317,4 +324,46 @@ func (s *service) ListActiveRides(ctx context.Context) ([]Ride, error) {
 		rides = append(rides, r)
 	}
 	return rides, rows.Err()
+}
+
+func (s *service) GetAdminSettings(ctx context.Context) (json.RawMessage, error) {
+	var settings json.RawMessage
+	err := s.db.QueryRowContext(ctx,
+		`SELECT settings FROM admin_settings WHERE id = 1`,
+	).Scan(&settings)
+	if err == sql.ErrNoRows {
+		return json.RawMessage(`{}`), nil
+	}
+	return settings, err
+}
+
+func (s *service) UpsertAdminSettings(ctx context.Context, settings json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO admin_settings (id, settings, updated_at)
+		 VALUES (1, $1, NOW())
+		 ON CONFLICT (id) DO UPDATE SET settings = $1, updated_at = NOW()`,
+		settings,
+	)
+	return err
+}
+
+func (s *service) GetMatchingParams(ctx context.Context) (json.RawMessage, error) {
+	var params json.RawMessage
+	err := s.db.QueryRowContext(ctx,
+		`SELECT matching_params FROM admin_settings WHERE id = 1`,
+	).Scan(&params)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return params, err
+}
+
+func (s *service) UpsertMatchingParams(ctx context.Context, params json.RawMessage) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO admin_settings (id, matching_params, updated_at)
+		 VALUES (1, $1, NOW())
+		 ON CONFLICT (id) DO UPDATE SET matching_params = $1, updated_at = NOW()`,
+		params,
+	)
+	return err
 }
