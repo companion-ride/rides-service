@@ -57,10 +57,10 @@ func (c *Client) ProxyRequest(req *http.Request) (*http.Response, error) {
 	return c.httpClient.Do(req)
 }
 
-func (c *Client) SetLocation(ctx context.Context, userID string, lat, lon float64) error {
+func (c *Client) SetLocation(ctx context.Context, userID, userType string, lat, lon float64) error {
 	body, err := json.Marshal(map[string]any{
 		"user_id":   userID,
-		"user_type": "driver",
+		"user_type": userType,
 		"latitude":  lat,
 		"longitude": lon,
 	})

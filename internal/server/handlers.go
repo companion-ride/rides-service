@@ -293,7 +293,7 @@ func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 		return
 	}
 
-	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, req.Lat, req.Lon); err != nil {
+	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, "driver", req.Lat, req.Lon); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to set location: " + err.Error()})
 		log.Printf("set driver location error: %v", err)
 		return

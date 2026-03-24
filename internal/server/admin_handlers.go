@@ -26,7 +26,7 @@ func (s *Server) AdminGetSettingsHandler(c *gin.Context) {
 }
 
 func (s *Server) AdminUpdateSettingsHandler(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 64*1024)) // 64KB max
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
 		return
