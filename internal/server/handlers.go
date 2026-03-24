@@ -258,7 +258,7 @@ func segmentsToWKT(segments []pathfinder.Segment) string {
 			points = append(points, fmt.Sprintf("%f %f", coord.Lon, coord.Lat))
 		}
 	}
-	if len(points) == 0 {
+	if len(points) < 2 {
 		return ""
 	}
 	return "LINESTRING(" + strings.Join(points, ",") + ")"

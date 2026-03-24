@@ -230,7 +230,12 @@ func (s *Server) AdminActiveDriversHandler(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read location service response"})
+		log.Printf("admin active drivers read error: %v", err)
+		return
+	}
 	c.Data(resp.StatusCode, "application/json", body)
 }
 
