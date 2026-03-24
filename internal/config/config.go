@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 
@@ -22,7 +23,20 @@ type Config struct {
 }
 
 func Load() *Config {
-	port, _ := strconv.Atoi(os.Getenv("PORT"))
+	port, err := strconv.Atoi(os.Getenv("PORT"))
+	if err != nil || port == 0 {
+		port = 8081
+		if os.Getenv("PORT") != "" {
+			log.Printf("WARNING: invalid PORT %q, defaulting to %d", os.Getenv("PORT"), port)
+		}
+	}
+
+	// Validate critical environment variables
+	for _, key := range []string{"JWT_SECRET_KEY", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME"} {
+		if os.Getenv(key) == "" {
+			log.Fatalf("%s environment variable is required", key)
+		}
+	}
 
 	return &Config{
 		Port:               port,
