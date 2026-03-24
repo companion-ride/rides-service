@@ -33,3 +33,7 @@ main
 .DS_Store
 
 .claude
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

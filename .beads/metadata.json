@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "rides",
+  "project_id": "5456c065-c2ec-45a5-b102-53e5729fbd21"
+}
