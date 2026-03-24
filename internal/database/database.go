@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -156,17 +157,22 @@ type service struct {
 	db *sql.DB
 }
 
-var dbInstance *service
+var (
+	dbOnce     sync.Once
+	dbInstance *service
+)
 
 func New(connStr string) Service {
-	if dbInstance != nil {
-		return dbInstance
-	}
-	db, err := sql.Open("pgx", connStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	dbInstance = &service{db: db}
+	dbOnce.Do(func() {
+		db, err := sql.Open("pgx", connStr)
+		if err != nil {
+			log.Fatal(err)
+		}
+		db.SetMaxOpenConns(25)
+		db.SetMaxIdleConns(5)
+		db.SetConnMaxLifetime(5 * time.Minute)
+		dbInstance = &service{db: db}
+	})
 	return dbInstance
 }
 
@@ -180,7 +186,6 @@ func (s *service) Health() map[string]string {
 	if err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
-		log.Fatalf("db down: %v", err)
 		return stats
 	}
 

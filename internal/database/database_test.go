@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,7 +67,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestNew(t *testing.T) {
-	dbInstance = nil // reset singleton
+	dbOnce = sync.Once{} // reset singleton
+	dbOnce = sync.Once{}
+	dbInstance = nil
 	srv := New(testConnStr)
 	if srv == nil {
 		t.Fatal("New() returned nil")
@@ -74,6 +77,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
+	dbOnce = sync.Once{}
 	dbInstance = nil
 	srv := New(testConnStr)
 
@@ -93,6 +97,7 @@ func TestHealth(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	dbOnce = sync.Once{}
 	dbInstance = nil
 	srv := New(testConnStr)
 
