@@ -58,7 +58,7 @@ func (s *Server) ListRidesHandler(c *gin.Context) {
 
 func (s *Server) GetRouteHandler(c *gin.Context) {
 	routeID := c.Param("id")
-	route, err := s.pathfinder.GetRoute(c.Request.Context(), routeID)
+	route, err := s.pathfinder.GetRoute(c.Request.Context(), c.GetHeader("Authorization"), routeID)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to get route: " + err.Error()})
 		return
@@ -79,7 +79,7 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 	}
 
 	// Call pathfinder to create the driving route
-	routeResp, err := s.pathfinder.CreateRoute(c.Request.Context(),
+	routeResp, err := s.pathfinder.CreateRoute(c.Request.Context(), c.GetHeader("Authorization"),
 		req.Start.Lat, req.Start.Lon, req.Finish.Lat, req.Finish.Lon,
 	)
 	if err != nil {
@@ -200,7 +200,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 
 	// Get walking directions from pathfinder
 	var walkPath *WalkPath
-	walkResp, err := s.pathfinder.WalkToClosest(c.Request.Context(),
+	walkResp, err := s.pathfinder.WalkToClosest(c.Request.Context(), c.GetHeader("Authorization"),
 		match.RouteID, req.Pickup.Lat, req.Pickup.Lon,
 	)
 	if err != nil {
