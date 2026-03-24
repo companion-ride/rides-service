@@ -23,6 +23,7 @@ type Config struct {
 	DropoffRadiusM     float64
 	MinETASeconds      int
 	MinDriverDistanceM float64
+	JWTSecretKey       string
 }
 
 func Load() *Config {
@@ -49,6 +50,7 @@ func Load() *Config {
 		DropoffRadiusM:     dropoffRadius,
 		MinETASeconds:      minETA,
 		MinDriverDistanceM: minDriverDist,
+		JWTSecretKey:       os.Getenv("JWT_SECRET_KEY"),
 	}
 }
 
