@@ -5,6 +5,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+
+	"rides/internal/auth"
 )
 
 func (s *Server) RegisterRoutes() http.Handler {
@@ -17,24 +19,37 @@ func (s *Server) RegisterRoutes() http.Handler {
 		AllowCredentials: true,
 	}))
 
+	// Public routes
 	r.GET("/", s.HelloWorldHandler)
 	r.GET("/health", s.healthHandler)
-
 	r.StaticFile("/driver", "./web/driver.html")
 	r.StaticFile("/passenger", "./web/passenger.html")
 	r.StaticFile("/docs", "./web/swagger.html")
 	r.GET("/docs/swagger.json", s.SwaggerJSONHandler)
 	r.GET("/config", s.ConfigHandler)
-	r.GET("/route/:id", s.GetRouteHandler)
-	r.GET("/rides", s.ListRidesHandler)
 
-	r.POST("/driver/location", s.SetDriverLocationHandler)
+	// Protected routes
+	protected := r.Group("/")
+	protected.Use(auth.Middleware(s.cfg.JWTSecretKey))
+	protected.GET("/route/:id", s.GetRouteHandler)
+	protected.GET("/rides", s.ListRidesHandler)
+	protected.POST("/driver/location", s.SetDriverLocationHandler)
 
-	ride := r.Group("/ride")
-	{
-		ride.POST("/driver/path", s.CreateDriverPathHandler)
-		ride.POST("/passenger/match", s.MatchPassengerHandler)
-	}
+	protectedRide := protected.Group("/ride")
+	protectedRide.POST("/driver/path", s.CreateDriverPathHandler)
+	protectedRide.POST("/passenger/match", s.MatchPassengerHandler)
+
+	// Admin routes (JWT + admin role required)
+	admin := protected.Group("/admin")
+	admin.Use(auth.RequireRole("admin"))
+	admin.GET("/rides", s.AdminListRidesHandler)
+	admin.GET("/rides/:id", s.AdminGetRideHandler)
+	admin.GET("/matching/stats", s.AdminMatchingStatsHandler)
+	admin.GET("/matching/params", s.AdminGetMatchingParamsHandler)
+	admin.PUT("/matching/params", s.AdminUpdateMatchingParamsHandler)
+	admin.GET("/settings", s.AdminGetSettingsHandler)
+	admin.PUT("/settings", s.AdminUpdateSettingsHandler)
+	admin.GET("/drivers/active", s.AdminActiveDriversHandler)
 
 	return r
 }

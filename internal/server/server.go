@@ -12,20 +12,22 @@ import (
 )
 
 type Server struct {
-	port       int
-	cfg        *config.Config
-	db         database.Service
-	pathfinder *pathfinder.Client
-	location   *location.Client
+	port           int
+	cfg            *config.Config
+	db             database.Service
+	pathfinder     *pathfinder.Client
+	location       *location.Client
+	matchingParams *config.MatchingParamsLoader
 }
 
-func NewServer(cfg *config.Config, db database.Service) *http.Server {
+func NewServer(cfg *config.Config, db database.Service, mp *config.MatchingParamsLoader) *http.Server {
 	s := &Server{
-		port:       cfg.Port,
-		cfg:        cfg,
-		db:         db,
-		pathfinder: pathfinder.NewClient(cfg.PathfinderURL),
-		location:   location.NewClient(cfg.LocationServiceURL),
+		port:           cfg.Port,
+		cfg:            cfg,
+		db:             db,
+		pathfinder:     pathfinder.NewClient(cfg.PathfinderURL),
+		location:       location.NewClient(cfg.LocationServiceURL),
+		matchingParams: mp,
 	}
 
 	server := &http.Server{

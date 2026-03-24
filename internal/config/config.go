@@ -18,20 +18,11 @@ type Config struct {
 	PathfinderURL      string
 	LocationServiceURL string
 	DoubleGISAPIKey    string
-	MaxPassengers      int
-	PickupRadiusM      float64
-	DropoffRadiusM     float64
-	MinETASeconds      int
-	MinDriverDistanceM float64
+	JWTSecretKey       string
 }
 
 func Load() *Config {
 	port, _ := strconv.Atoi(os.Getenv("PORT"))
-	maxPassengers := envIntOrDefault("MAX_PASSENGERS", 3)
-	pickupRadius := envFloatOrDefault("PICKUP_RADIUS_M", 500)
-	dropoffRadius := envFloatOrDefault("DROPOFF_RADIUS_M", 500)
-	minETA := envIntOrDefault("MIN_ETA_SECONDS", 180)
-	minDriverDist := envFloatOrDefault("MIN_DRIVER_DISTANCE_M", 2000)
 
 	return &Config{
 		Port:               port,
@@ -44,11 +35,7 @@ func Load() *Config {
 		PathfinderURL:      os.Getenv("PATHFINDER_URL"),
 		LocationServiceURL: os.Getenv("LOCATION_SERVICE_URL"),
 		DoubleGISAPIKey:    os.Getenv("DOUBLE_GIS_API_KEY"),
-		MaxPassengers:      maxPassengers,
-		PickupRadiusM:      pickupRadius,
-		DropoffRadiusM:     dropoffRadius,
-		MinETASeconds:      minETA,
-		MinDriverDistanceM: minDriverDist,
+		JWTSecretKey:       os.Getenv("JWT_SECRET_KEY"),
 	}
 }
 
