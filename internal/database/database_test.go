@@ -68,7 +68,6 @@ func TestMain(m *testing.M) {
 
 func TestNew(t *testing.T) {
 	dbOnce = sync.Once{} // reset singleton
-	dbOnce = sync.Once{}
 	dbInstance = nil
 	srv := New(testConnStr)
 	if srv == nil {
