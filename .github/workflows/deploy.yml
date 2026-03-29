@@ -33,8 +33,10 @@ jobs:
           SERVICE_HOST: ${{ secrets.SERVICE_HOST }}
           SWAGGER_HOST: ${{ secrets.SWAGGER_HOST }}
           SWAGGER_BASE_PATH: ${{ secrets.SWAGGER_BASE_PATH }}
+          KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.KAFKA_BOOTSTRAP_SERVERS }}
         run: |
           docker network create blueprint 2>/dev/null || true
           docker network create pathfinder_blueprint 2>/dev/null || true
+          docker network create kafka_network 2>/dev/null || true
           docker compose -f docker-compose.prod.yml build
           docker compose -f docker-compose.prod.yml up -d

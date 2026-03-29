@@ -24,12 +24,14 @@ services:
       DROPOFF_RADIUS_M: ${DROPOFF_RADIUS_M}
       MIN_ETA_SECONDS: ${MIN_ETA_SECONDS}
       DOUBLE_GIS_API_KEY: ${DOUBLE_GIS_API_KEY}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
     depends_on:
       psql_bp:
         condition: service_healthy
     networks:
       - blueprint
       - pathfinder_blueprint
+      - kafka_network
   psql_bp:
     image: postgis/postgis:17-3.5
     restart: unless-stopped
@@ -56,4 +58,6 @@ networks:
   blueprint:
     external: true
   pathfinder_blueprint:
+    external: true
+  kafka_network:
     external: true
