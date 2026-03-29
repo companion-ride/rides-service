@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -18,7 +19,10 @@ const (
 	StatusActive    = "active"
 	StatusCompleted = "completed"
 	StatusCancelled = "cancelled"
+	StatusPickedUp  = "picked_up"
 )
+
+var ErrRideAtCapacity = errors.New("ride at capacity")
 
 type Ride struct {
 	RideID        string
@@ -30,8 +34,10 @@ type Ride struct {
 	FinishLat     float64
 	FinishLon     float64
 	TotalDuration int
+	MaxPassengers int
 	Status        string
 	StartedAt     *time.Time
+	CompletedAt   *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -49,6 +55,11 @@ type SubRide struct {
 	FinishLat   float64
 	FinishLon   float64
 	Status      string
+	Price       *int
+	Preferences []string
+	Baggage     string
+	Comment     string
+	PickedUpAt  *time.Time
 }
 
 type MatchParams struct {
@@ -62,15 +73,16 @@ type MatchParams struct {
 }
 
 type MatchResult struct {
-	RideID        string
-	DriverID      string
-	RouteID       string
-	TotalDuration int
-	Status        string
-	PickupWalkM   float64
-	DropoffWalkM  float64
-	PickupFrac    float64
-	DropoffFrac   float64
+	RideID          string
+	DriverID        string
+	RouteID         string
+	TotalDuration   int
+	MaxPassengers   int
+	Status          string
+	PickupWalkM     float64
+	DropoffWalkM    float64
+	PickupFrac      float64
+	DropoffFrac     float64
 	PickupPointLat  float64
 	PickupPointLon  float64
 	DropoffPointLat float64
@@ -128,6 +140,37 @@ type MatchingStats struct {
 	CancelledRides int
 }
 
+type DriverRideHistoryRow struct {
+	RideID         string
+	RouteID        string
+	Status         string
+	MaxPassengers  int
+	StartLat       float64
+	StartLon       float64
+	FinishLat      float64
+	FinishLon      float64
+	TotalDuration  int
+	PassengerCount int
+	TotalEarnings  int
+	StartedAt      *time.Time
+	CompletedAt    *time.Time
+	CreatedAt      time.Time
+}
+
+type PassengerRideHistoryRow struct {
+	SubRideID   string
+	RideID      string
+	DriverID    string
+	Status      string
+	Price       *int
+	PickupLat   float64
+	PickupLon   float64
+	DropoffLat  float64
+	DropoffLon  float64
+	CompletedAt *time.Time
+	CreatedAt   time.Time
+}
+
 type Service interface {
 	Health() map[string]string
 	Close() error
@@ -137,11 +180,18 @@ type Service interface {
 	UpdateRideStatus(ctx context.Context, rideID, status string) error
 
 	CreateSubRide(ctx context.Context, subRide *SubRide) error
+	CreateSubRideWithCapacityCheck(ctx context.Context, subRide *SubRide) error
+	GetSubRide(ctx context.Context, subRideID string) (*SubRide, error)
 	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
+	UpdateSubRideStatus(ctx context.Context, subRideID, status string) error
+	AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error)
 
 	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
 	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
 	ListActiveRides(ctx context.Context) ([]Ride, error)
+
+	GetDriverRideHistory(ctx context.Context, driverID string, limit, offset int) ([]DriverRideHistoryRow, int, error)
+	GetPassengerRideHistory(ctx context.Context, passengerID string, limit, offset int) ([]PassengerRideHistoryRow, int, error)
 
 	// Admin queries
 	GetAdminSettings(ctx context.Context) (json.RawMessage, error)
@@ -238,12 +288,12 @@ func EnsureSchema(connStr, schema string) error {
 
 func (s *service) CreateRide(ctx context.Context, ride *Ride) error {
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, status)
-		 VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7, $8, $9)
+		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, max_passengers, status)
+		 VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7, $8, $9, $10)
 		 RETURNING ride_id`,
 		ride.DriverID, ride.RouteID, ride.GeometryWKT,
 		ride.StartLat, ride.StartLon, ride.FinishLat, ride.FinishLon,
-		ride.TotalDuration, ride.Status,
+		ride.TotalDuration, ride.MaxPassengers, ride.Status,
 	).Scan(&ride.RideID)
 	if err != nil {
 		return fmt.Errorf("inserting ride: %w", err)
@@ -256,12 +306,12 @@ func (s *service) GetRide(ctx context.Context, rideID string) (*Ride, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT ride_id, driver_id, route_id, ST_AsText(geometry),
 		        start_lat, start_lon, finish_lat, finish_lon,
-		        total_duration, status, started_at, created_at, updated_at
+		        total_duration, max_passengers, status, started_at, completed_at, created_at, updated_at
 		 FROM rides WHERE ride_id = $1`,
 		rideID,
 	).Scan(&ride.RideID, &ride.DriverID, &ride.RouteID, &ride.GeometryWKT,
 		&ride.StartLat, &ride.StartLon, &ride.FinishLat, &ride.FinishLon,
-		&ride.TotalDuration, &ride.Status, &ride.StartedAt, &ride.CreatedAt, &ride.UpdatedAt)
+		&ride.TotalDuration, &ride.MaxPassengers, &ride.Status, &ride.StartedAt, &ride.CompletedAt, &ride.CreatedAt, &ride.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -269,23 +319,39 @@ func (s *service) GetRide(ctx context.Context, rideID string) (*Ride, error) {
 }
 
 func (s *service) UpdateRideStatus(ctx context.Context, rideID, status string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE rides SET status = $1, updated_at = now() WHERE ride_id = $2`,
-		status, rideID,
-	)
+	query := `UPDATE rides SET status = $1, updated_at = now()`
+	switch status {
+	case StatusActive:
+		query += `, started_at = now()`
+	case StatusCompleted:
+		query += `, completed_at = now()`
+	case StatusCancelled:
+		query += `, cancelled_at = now()`
+	}
+	query += ` WHERE ride_id = $2`
+	_, err := s.db.ExecContext(ctx, query, status, rideID)
 	return err
 }
 
 func (s *service) CreateSubRide(ctx context.Context, sr *SubRide) error {
+	prefsJSON, _ := json.Marshal(sr.Preferences)
+	if sr.Preferences == nil {
+		prefsJSON = []byte("[]")
+	}
+	baggage := sr.Baggage
+	if baggage == "" {
+		baggage = "none"
+	}
 	err := s.db.QueryRowContext(ctx,
 		`INSERT INTO sub_rides (ride_id, passenger_id, pickup_lat, pickup_lon, dropoff_lat, dropoff_lon,
-		                        start_lat, start_lon, finish_lat, finish_lon, status)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		                        start_lat, start_lon, finish_lat, finish_lon, status,
+		                        price, preferences, baggage, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		 RETURNING sub_ride_id`,
 		sr.RideID, sr.PassengerID,
 		sr.PickupLat, sr.PickupLon, sr.DropoffLat, sr.DropoffLon,
 		sr.StartLat, sr.StartLon, sr.FinishLat, sr.FinishLon,
-		sr.Status,
+		sr.Status, sr.Price, prefsJSON, baggage, sr.Comment,
 	).Scan(&sr.SubRideID)
 	if err != nil {
 		return fmt.Errorf("inserting sub_ride: %w", err)
@@ -296,7 +362,7 @@ func (s *service) CreateSubRide(ctx context.Context, sr *SubRide) error {
 func (s *service) CountActiveSubRides(ctx context.Context, rideID string) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM sub_rides WHERE ride_id = $1 AND status IN ('pending', 'active')`,
+		`SELECT COUNT(*) FROM sub_rides WHERE ride_id = $1 AND status IN ('pending', 'picked_up')`,
 		rideID,
 	).Scan(&count)
 	return count, err
@@ -305,14 +371,14 @@ func (s *service) CountActiveSubRides(ctx context.Context, rideID string) (int, 
 func (s *service) FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error) {
 	query := `
 WITH candidates AS (
-    SELECT r.ride_id, r.driver_id, r.route_id, r.geometry, r.total_duration, r.status
+    SELECT r.ride_id, r.driver_id, r.route_id, r.geometry, r.total_duration, r.max_passengers, r.status
     FROM rides r
     WHERE r.status IN ('pending', 'active')
       AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5)
       AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $6)
 )
 SELECT
-    c.ride_id, c.driver_id, c.route_id, c.total_duration, c.status,
+    c.ride_id, c.driver_id, c.route_id, c.total_duration, c.max_passengers, c.status,
     ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) AS pickup_walk_m,
     ST_Distance(c.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography) AS dropoff_walk_m,
     ST_LineLocatePoint(c.geometry, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS pickup_frac,
@@ -345,7 +411,7 @@ LIMIT $7`
 	for rows.Next() {
 		var m MatchResult
 		if err := rows.Scan(
-			&m.RideID, &m.DriverID, &m.RouteID, &m.TotalDuration, &m.Status,
+			&m.RideID, &m.DriverID, &m.RouteID, &m.TotalDuration, &m.MaxPassengers, &m.Status,
 			&m.PickupWalkM, &m.DropoffWalkM,
 			&m.PickupFrac, &m.DropoffFrac,
 			&m.PickupPointLat, &m.PickupPointLon,
@@ -562,4 +628,191 @@ func (s *service) GetMatchingStats(ctx context.Context) (*MatchingStats, error) 
 	}
 
 	return stats, nil
+}
+
+func (s *service) GetSubRide(ctx context.Context, subRideID string) (*SubRide, error) {
+	var sr SubRide
+	err := s.db.QueryRowContext(ctx,
+		`SELECT sub_ride_id, ride_id, passenger_id, pickup_lat, pickup_lon,
+		        dropoff_lat, dropoff_lon, start_lat, start_lon, finish_lat, finish_lon, status
+		 FROM sub_rides WHERE sub_ride_id = $1`,
+		subRideID,
+	).Scan(&sr.SubRideID, &sr.RideID, &sr.PassengerID,
+		&sr.PickupLat, &sr.PickupLon, &sr.DropoffLat, &sr.DropoffLon,
+		&sr.StartLat, &sr.StartLon, &sr.FinishLat, &sr.FinishLon, &sr.Status)
+	if err != nil {
+		return nil, err
+	}
+	return &sr, nil
+}
+
+func (s *service) UpdateSubRideStatus(ctx context.Context, subRideID, status string) error {
+	query := `UPDATE sub_rides SET status = $1, updated_at = now()`
+	switch status {
+	case StatusPickedUp:
+		query += `, picked_up_at = now()`
+	case StatusCompleted:
+		query += `, completed_at = now()`
+	case StatusCancelled:
+		query += `, cancelled_at = now()`
+	}
+	query += ` WHERE sub_ride_id = $2`
+	_, err := s.db.ExecContext(ctx, query, status, subRideID)
+	return err
+}
+
+func (s *service) AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error) {
+	var total, unfinished int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*),
+		        COUNT(*) FILTER (WHERE status NOT IN ('completed', 'cancelled'))
+		 FROM sub_rides WHERE ride_id = $1`,
+		rideID,
+	).Scan(&total, &unfinished)
+	if err != nil {
+		return false, err
+	}
+	return total > 0 && unfinished == 0, nil
+}
+
+func (s *service) CreateSubRideWithCapacityCheck(ctx context.Context, sr *SubRide) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var maxPass int
+	err = tx.QueryRowContext(ctx,
+		`SELECT max_passengers FROM rides WHERE ride_id = $1 FOR UPDATE`,
+		sr.RideID,
+	).Scan(&maxPass)
+	if err != nil {
+		return fmt.Errorf("locking ride: %w", err)
+	}
+
+	var count int
+	err = tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sub_rides WHERE ride_id = $1 AND status IN ('pending', 'picked_up')`,
+		sr.RideID,
+	).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("counting sub-rides: %w", err)
+	}
+	if count >= maxPass {
+		return ErrRideAtCapacity
+	}
+
+	prefsJSON, _ := json.Marshal(sr.Preferences)
+	if sr.Preferences == nil {
+		prefsJSON = []byte("[]")
+	}
+	baggage := sr.Baggage
+	if baggage == "" {
+		baggage = "none"
+	}
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO sub_rides (ride_id, passenger_id, pickup_lat, pickup_lon, dropoff_lat, dropoff_lon,
+		                        start_lat, start_lon, finish_lat, finish_lon, status,
+		                        price, preferences, baggage, comment)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		 RETURNING sub_ride_id`,
+		sr.RideID, sr.PassengerID,
+		sr.PickupLat, sr.PickupLon, sr.DropoffLat, sr.DropoffLon,
+		sr.StartLat, sr.StartLon, sr.FinishLat, sr.FinishLon,
+		sr.Status, sr.Price, prefsJSON, baggage, sr.Comment,
+	).Scan(&sr.SubRideID)
+	if err != nil {
+		return fmt.Errorf("inserting sub_ride: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *service) GetDriverRideHistory(ctx context.Context, driverID string, limit, offset int) ([]DriverRideHistoryRow, int, error) {
+	var total int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM rides WHERE driver_id = $1`, driverID,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("counting driver rides: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT r.ride_id, r.route_id, r.status, r.max_passengers,
+		        r.start_lat, r.start_lon, r.finish_lat, r.finish_lon,
+		        r.total_duration,
+		        COALESCE(sr.passenger_count, 0),
+		        COALESCE(sr.total_earnings, 0),
+		        r.started_at, r.completed_at, r.created_at
+		 FROM rides r
+		 LEFT JOIN (
+		     SELECT ride_id, COUNT(*) AS passenger_count, SUM(COALESCE(price, 0)) AS total_earnings
+		     FROM sub_rides
+		     GROUP BY ride_id
+		 ) sr ON sr.ride_id = r.ride_id
+		 WHERE r.driver_id = $1
+		 ORDER BY r.created_at DESC
+		 LIMIT $2 OFFSET $3`,
+		driverID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("querying driver history: %w", err)
+	}
+	defer rows.Close()
+
+	var result []DriverRideHistoryRow
+	for rows.Next() {
+		var r DriverRideHistoryRow
+		if err := rows.Scan(
+			&r.RideID, &r.RouteID, &r.Status, &r.MaxPassengers,
+			&r.StartLat, &r.StartLon, &r.FinishLat, &r.FinishLon,
+			&r.TotalDuration, &r.PassengerCount, &r.TotalEarnings,
+			&r.StartedAt, &r.CompletedAt, &r.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scanning driver history: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, total, rows.Err()
+}
+
+func (s *service) GetPassengerRideHistory(ctx context.Context, passengerID string, limit, offset int) ([]PassengerRideHistoryRow, int, error) {
+	var total int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sub_rides WHERE passenger_id = $1`, passengerID,
+	).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("counting passenger rides: %w", err)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sr.sub_ride_id, sr.ride_id, r.driver_id, sr.status,
+		        sr.price, sr.pickup_lat, sr.pickup_lon, sr.dropoff_lat, sr.dropoff_lon,
+		        sr.completed_at, sr.created_at
+		 FROM sub_rides sr
+		 JOIN rides r ON r.ride_id = sr.ride_id
+		 WHERE sr.passenger_id = $1
+		 ORDER BY sr.created_at DESC
+		 LIMIT $2 OFFSET $3`,
+		passengerID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("querying passenger history: %w", err)
+	}
+	defer rows.Close()
+
+	var result []PassengerRideHistoryRow
+	for rows.Next() {
+		var r PassengerRideHistoryRow
+		if err := rows.Scan(
+			&r.SubRideID, &r.RideID, &r.DriverID, &r.Status,
+			&r.Price, &r.PickupLat, &r.PickupLon, &r.DropoffLat, &r.DropoffLon,
+			&r.CompletedAt, &r.CreatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scanning passenger history: %w", err)
+		}
+		result = append(result, r)
+	}
+	return result, total, rows.Err()
 }
