@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -96,6 +97,15 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 
 	totalDuration := parseDuration(routeResp.TotalDuration)
 
+	maxPass := req.MaxPassengers
+	if maxPass <= 0 {
+		maxPass = 3
+	}
+	mp := s.matchingParams.Get()
+	if maxPass > mp.MaxPassengers {
+		maxPass = mp.MaxPassengers
+	}
+
 	ride := &database.Ride{
 		DriverID:      req.DriverID,
 		RouteID:       routeResp.RouteID,
@@ -105,6 +115,7 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 		FinishLat:     req.Finish.Lat,
 		FinishLon:     req.Finish.Lon,
 		TotalDuration: totalDuration,
+		MaxPassengers: maxPass,
 		Status:        database.StatusPending,
 	}
 
@@ -159,7 +170,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 			log.Printf("count sub-rides error: %v", err)
 			continue
 		}
-		if count >= mp.MaxPassengers {
+		if count >= cand.MaxPassengers {
 			continue
 		}
 
@@ -320,4 +331,66 @@ func (s *Server) SwaggerJSONHandler(c *gin.Context) {
 		spec["basePath"] = bp
 	}
 	c.JSON(http.StatusOK, spec)
+}
+
+func (s *Server) RideHistoryHandler(c *gin.Context) {
+	userID := auth.GetUserID(c)
+	role := auth.GetRole(c)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	ctx := c.Request.Context()
+
+	if role == "driver" {
+		rows, total, err := s.db.GetDriverRideHistory(ctx, userID, limit, offset)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get history"})
+			log.Printf("driver history error: %v", err)
+			return
+		}
+		items := make([]DriverHistoryItem, len(rows))
+		for i, r := range rows {
+			items[i] = DriverHistoryItem{
+				RideID: r.RideID, RouteID: r.RouteID, Status: r.Status,
+				MaxPassengers: r.MaxPassengers,
+				StartLat: r.StartLat, StartLon: r.StartLon,
+				FinishLat: r.FinishLat, FinishLon: r.FinishLon,
+				TotalDuration: r.TotalDuration, PassengerCount: r.PassengerCount,
+				TotalEarnings: r.TotalEarnings,
+				StartedAt: r.StartedAt, CompletedAt: r.CompletedAt, CreatedAt: r.CreatedAt,
+			}
+		}
+		c.JSON(http.StatusOK, HistoryResponse{Rides: items, Total: total, Page: page, Limit: limit})
+		return
+	}
+
+	// Default: passenger
+	rows, total, err := s.db.GetPassengerRideHistory(ctx, userID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get history"})
+		log.Printf("passenger history error: %v", err)
+		return
+	}
+	items := make([]PassengerHistoryItem, len(rows))
+	for i, r := range rows {
+		items[i] = PassengerHistoryItem{
+			SubRideID: r.SubRideID, RideID: r.RideID, DriverID: r.DriverID,
+			Status: r.Status, Price: r.Price,
+			PickupLat: r.PickupLat, PickupLon: r.PickupLon,
+			DropoffLat: r.DropoffLat, DropoffLon: r.DropoffLon,
+			CompletedAt: r.CompletedAt, CreatedAt: r.CreatedAt,
+		}
+	}
+	c.JSON(http.StatusOK, HistoryResponse{Rides: items, Total: total, Page: page, Limit: limit})
 }
