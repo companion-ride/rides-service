@@ -3,10 +3,11 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +35,7 @@ func (s *Server) ListRidesHandler(c *gin.Context) {
 	rides, err := s.db.ListActiveRides(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rides"})
-		log.Printf("list rides error: %v", err)
+		slog.Error("failed to list rides", "error", err)
 		return
 	}
 	type rideItem struct {
@@ -96,6 +97,15 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 
 	totalDuration := parseDuration(routeResp.TotalDuration)
 
+	maxPass := req.MaxPassengers
+	if maxPass <= 0 {
+		maxPass = 3
+	}
+	mp := s.matchingParams.Get()
+	if maxPass > mp.MaxPassengers {
+		maxPass = mp.MaxPassengers
+	}
+
 	ride := &database.Ride{
 		DriverID:      req.DriverID,
 		RouteID:       routeResp.RouteID,
@@ -105,14 +115,17 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 		FinishLat:     req.Finish.Lat,
 		FinishLon:     req.Finish.Lon,
 		TotalDuration: totalDuration,
+		MaxPassengers: maxPass,
 		Status:        database.StatusPending,
 	}
 
 	if err := s.db.CreateRide(c.Request.Context(), ride); err != nil {
-		log.Printf("ORPHANED ROUTE: pathfinder route %s created but local ride insert failed: %v", routeResp.RouteID, err)
+		slog.Error("orphaned route: pathfinder route created but local ride insert failed", "route_id", routeResp.RouteID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save ride"})
 		return
 	}
+
+	slog.Info("ride created", "ride_id", ride.RideID, "route_id", routeResp.RouteID, "driver_id", req.DriverID)
 
 	c.JSON(http.StatusCreated, CreateDriverPathResponse{
 		RideID:  ride.RideID,
@@ -146,7 +159,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "matching query failed"})
-		log.Printf("matching query error: %v", err)
+		slog.Error("matching query failed", "passenger_id", req.PassengerID, "error", err)
 		return
 	}
 
@@ -156,10 +169,10 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 
 		count, err := s.db.CountActiveSubRides(c.Request.Context(), cand.RideID)
 		if err != nil {
-			log.Printf("count sub-rides error: %v", err)
+			slog.Error("failed to count sub-rides", "ride_id", cand.RideID, "error", err)
 			continue
 		}
-		if count >= mp.MaxPassengers {
+		if count >= cand.MaxPassengers {
 			continue
 		}
 
@@ -168,7 +181,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		if locErr == nil {
 			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
 			if dist < mp.MinDriverDistanceM {
-				log.Printf("driver %s too close (%.0fm < %.0fm), skipping", cand.DriverID, dist, mp.MinDriverDistanceM)
+				slog.Info("driver too close, skipping", "driver_id", cand.DriverID, "distance_m", dist, "min_distance_m", mp.MinDriverDistanceM)
 				continue
 			}
 
@@ -176,14 +189,12 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 			driverFrac, fracErr := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
 			if fracErr == nil {
 				if driverFrac >= cand.PickupFrac {
-					log.Printf("driver %s already passed pickup (frac %.3f >= %.3f), skipping",
-						cand.DriverID, driverFrac, cand.PickupFrac)
+					slog.Info("driver already passed pickup, skipping", "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac)
 					continue
 				}
 				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
 				if etaSeconds < float64(mp.MinETASeconds) {
-					log.Printf("driver %s ETA too short (%.0fs < %ds), skipping",
-						cand.DriverID, etaSeconds, mp.MinETASeconds)
+					slog.Info("driver ETA too short, skipping", "driver_id", cand.DriverID, "eta_seconds", etaSeconds, "min_eta_seconds", mp.MinETASeconds)
 					continue
 				}
 			}
@@ -204,7 +215,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		match.RouteID, req.Pickup.Lat, req.Pickup.Lon,
 	)
 	if err != nil {
-		log.Printf("walk-to-closest failed (non-fatal): %v", err)
+		slog.Warn("walk-to-closest failed", "ride_id", match.RideID, "error", err)
 	} else {
 		coords := make([]WalkCoord, len(walkResp.Geometry))
 		for i, p := range walkResp.Geometry {
@@ -233,9 +244,11 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 
 	if err := s.db.CreateSubRide(c.Request.Context(), subRide); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create sub-ride"})
-		log.Printf("create sub-ride error: %v", err)
+		slog.Error("failed to create sub-ride", "ride_id", match.RideID, "passenger_id", req.PassengerID, "error", err)
 		return
 	}
+
+	slog.Info("passenger matched", "ride_id", match.RideID, "passenger_id", req.PassengerID, "driver_id", match.DriverID, "sub_ride_id", subRide.SubRideID)
 
 	c.JSON(http.StatusCreated, MatchPassengerResponse{
 		SubRideID:    subRide.SubRideID,
@@ -277,7 +290,7 @@ func parseDuration(s string) int {
 	if n, _ := fmt.Sscanf(s, "%d min", &mins); n == 1 {
 		return mins * 60
 	}
-	log.Printf("unrecognized duration format: %q", s)
+	slog.Warn("unrecognized duration format", "duration", s)
 	return 0
 }
 
@@ -295,7 +308,7 @@ func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 
 	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, "driver", req.Lat, req.Lon); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to set location: " + err.Error()})
-		log.Printf("set driver location error: %v", err)
+		slog.Error("failed to set driver location", "driver_id", req.DriverID, "error", err)
 		return
 	}
 
@@ -320,4 +333,66 @@ func (s *Server) SwaggerJSONHandler(c *gin.Context) {
 		spec["basePath"] = bp
 	}
 	c.JSON(http.StatusOK, spec)
+}
+
+func (s *Server) RideHistoryHandler(c *gin.Context) {
+	userID := auth.GetUserID(c)
+	role := auth.GetRole(c)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	ctx := c.Request.Context()
+
+	if role == "driver" {
+		rows, total, err := s.db.GetDriverRideHistory(ctx, userID, limit, offset)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get history"})
+			slog.Error("failed to get driver ride history", "user_id", userID, "error", err)
+			return
+		}
+		items := make([]DriverHistoryItem, len(rows))
+		for i, r := range rows {
+			items[i] = DriverHistoryItem{
+				RideID: r.RideID, RouteID: r.RouteID, Status: r.Status,
+				MaxPassengers: r.MaxPassengers,
+				StartLat: r.StartLat, StartLon: r.StartLon,
+				FinishLat: r.FinishLat, FinishLon: r.FinishLon,
+				TotalDuration: r.TotalDuration, PassengerCount: r.PassengerCount,
+				TotalEarnings: r.TotalEarnings,
+				StartedAt: r.StartedAt, CompletedAt: r.CompletedAt, CreatedAt: r.CreatedAt,
+			}
+		}
+		c.JSON(http.StatusOK, HistoryResponse{Rides: items, Total: total, Page: page, Limit: limit})
+		return
+	}
+
+	// Default: passenger
+	rows, total, err := s.db.GetPassengerRideHistory(ctx, userID, limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get history"})
+		slog.Error("failed to get passenger ride history", "user_id", userID, "error", err)
+		return
+	}
+	items := make([]PassengerHistoryItem, len(rows))
+	for i, r := range rows {
+		items[i] = PassengerHistoryItem{
+			SubRideID: r.SubRideID, RideID: r.RideID, DriverID: r.DriverID,
+			Status: r.Status, Price: r.Price,
+			PickupLat: r.PickupLat, PickupLon: r.PickupLon,
+			DropoffLat: r.DropoffLat, DropoffLon: r.DropoffLon,
+			CompletedAt: r.CompletedAt, CreatedAt: r.CreatedAt,
+		}
+	}
+	c.JSON(http.StatusOK, HistoryResponse{Rides: items, Total: total, Page: page, Limit: limit})
 }

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +14,9 @@ import (
 
 	"rides/internal/config"
 	"rides/internal/database"
+	kafkapkg "rides/internal/kafka"
+	"rides/internal/location"
+	"rides/internal/matching"
 	"rides/internal/server"
 )
 
@@ -35,18 +38,18 @@ func registerWithGateway(port int) {
 	})
 	req, err := http.NewRequest(http.MethodPost, gatewayURL+"/internal/register", bytes.NewReader(body))
 	if err != nil {
-		log.Printf("could not create gateway register request: %v", err)
+		slog.Error("could not create gateway register request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := gatewayClient.Do(req)
 	if err != nil {
-		log.Printf("could not register with api-gateway: %v", err)
+		slog.Error("could not register with api-gateway", "error", err)
 		return
 	}
 	resp.Body.Close()
-	log.Printf("registered with api-gateway as %s", _serviceName)
+	slog.Info("registered with api-gateway", "service", _serviceName)
 }
 
 func deregisterFromGateway() {
@@ -57,42 +60,54 @@ func deregisterFromGateway() {
 	}
 	req, err := http.NewRequest(http.MethodDelete, gatewayURL+"/internal/deregister?name="+_serviceName, nil)
 	if err != nil {
-		log.Printf("could not create gateway deregister request: %v", err)
+		slog.Error("could not create gateway deregister request", "error", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := gatewayClient.Do(req)
 	if err != nil {
-		log.Printf("could not deregister from api-gateway: %v", err)
+		slog.Error("could not deregister from api-gateway", "error", err)
 		return
 	}
 	resp.Body.Close()
-	log.Printf("deregistered from api-gateway: %s", _serviceName)
+	slog.Info("deregistered from api-gateway", "service", _serviceName)
 }
 
-func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, done chan bool) {
+func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, kafkaCancel context.CancelFunc, consumer *kafkapkg.Consumer, producer *kafkapkg.Producer, done chan bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	<-ctx.Done()
 
-	log.Println("shutting down gracefully, press Ctrl+C again to force")
+	slog.Info("shutting down gracefully, press Ctrl+C again to force")
 	stop()
 
 	reloadCancel()
+	kafkaCancel()
 	deregisterFromGateway()
+
+	if consumer != nil {
+		consumer.Close()
+	}
+	if producer != nil {
+		producer.Close()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := apiServer.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown with error: %v", err)
+		slog.Error("server forced to shutdown", "error", err)
 	}
 
-	log.Println("Server exiting")
+	slog.Info("server exiting")
 	done <- true
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	cfg := config.Load()
 
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable&search_path=%s",
@@ -101,13 +116,15 @@ func main() {
 	// Ensure schema exists before running migrations
 	if cfg.DBSchema != "" {
 		if err := database.EnsureSchema(connStr, cfg.DBSchema); err != nil {
-			log.Fatalf("failed to ensure schema %q: %v", cfg.DBSchema, err)
+			slog.Error("failed to ensure schema", "schema", cfg.DBSchema, "error", err)
+			os.Exit(1)
 		}
 	}
 
 	// Run database migrations
 	if err := database.RunMigrations(connStr, "migrations"); err != nil {
-		log.Fatalf("migration failed: %v", err)
+		slog.Error("migration failed", "error", err)
+		os.Exit(1)
 	}
 
 	db := database.New(connStr)
@@ -139,19 +156,41 @@ func main() {
 		return &p, nil
 	})
 
+	// Kafka setup
+	var kafkaConsumer *kafkapkg.Consumer
+	var kafkaProducer *kafkapkg.Producer
+	kafkaCtx, kafkaCancel := context.WithCancel(context.Background())
+
+	if cfg.KafkaBootstrapServers != "" {
+		kafkaProducer = kafkapkg.NewProducer(cfg.KafkaBootstrapServers)
+		locClient := location.NewClient(cfg.LocationServiceURL)
+
+		offerMgr := matching.NewOfferManager(kafkaProducer, db, locClient, mpLoader)
+		handler := matching.NewHandler(offerMgr, db, kafkaProducer)
+
+		kafkaConsumer = kafkapkg.NewConsumer(
+			cfg.KafkaBootstrapServers,
+			"rides-service",
+			matching.TopicRideRequests,
+			handler.HandleMessage,
+		)
+		go kafkaConsumer.Start(kafkaCtx)
+		slog.Info("kafka consumer started", "topic", matching.TopicRideRequests, "group", "rides-service")
+	}
+
 	srv := server.NewServer(cfg, db, mpLoader)
 
 	registerWithGateway(cfg.Port)
 
 	done := make(chan bool, 1)
-	go gracefulShutdown(srv, reloadCancel, done)
+	go gracefulShutdown(srv, reloadCancel, kafkaCancel, kafkaConsumer, kafkaProducer, done)
 
-	log.Printf("Starting rides service on port %d", cfg.Port)
+	slog.Info("starting rides service", "port", cfg.Port)
 	err := srv.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
 		panic(fmt.Sprintf("http server error: %s", err))
 	}
 
 	<-done
-	log.Println("Graceful shutdown complete.")
+	slog.Info("graceful shutdown complete")
 }

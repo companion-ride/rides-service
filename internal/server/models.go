@@ -1,14 +1,17 @@
 package server
 
+import "time"
+
 type Coord struct {
 	Lat float64 `json:"lat" binding:"required,min=-90,max=90"`
 	Lon float64 `json:"lon" binding:"required,min=-180,max=180"`
 }
 
 type CreateDriverPathRequest struct {
-	DriverID string `json:"driver_id" binding:"required,uuid"`
-	Start    Coord  `json:"start" binding:"required"`
-	Finish   Coord  `json:"finish" binding:"required"`
+	DriverID      string `json:"driver_id" binding:"required,uuid"`
+	Start         Coord  `json:"start" binding:"required"`
+	Finish        Coord  `json:"finish" binding:"required"`
+	MaxPassengers int    `json:"max_passengers"`
 }
 
 type CreateDriverPathResponse struct {
@@ -50,4 +53,42 @@ type SetDriverLocationRequest struct {
 	DriverID string  `json:"driver_id" binding:"required,uuid"`
 	Lat      float64 `json:"lat" binding:"required,min=-90,max=90"`
 	Lon      float64 `json:"lon" binding:"required,min=-180,max=180"`
+}
+
+type DriverHistoryItem struct {
+	RideID         string     `json:"ride_id"`
+	RouteID        string     `json:"route_id"`
+	Status         string     `json:"status"`
+	MaxPassengers  int        `json:"max_passengers"`
+	StartLat       float64    `json:"start_lat"`
+	StartLon       float64    `json:"start_lon"`
+	FinishLat      float64    `json:"finish_lat"`
+	FinishLon      float64    `json:"finish_lon"`
+	TotalDuration  int        `json:"total_duration"`
+	PassengerCount int        `json:"passenger_count"`
+	TotalEarnings  int        `json:"total_earnings"`
+	StartedAt      *time.Time `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+type PassengerHistoryItem struct {
+	SubRideID   string     `json:"sub_ride_id"`
+	RideID      string     `json:"ride_id"`
+	DriverID    string     `json:"driver_id"`
+	Status      string     `json:"status"`
+	Price       *int       `json:"price"`
+	PickupLat   float64    `json:"pickup_lat"`
+	PickupLon   float64    `json:"pickup_lon"`
+	DropoffLat  float64    `json:"dropoff_lat"`
+	DropoffLon  float64    `json:"dropoff_lon"`
+	CompletedAt *time.Time `json:"completed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
+
+type HistoryResponse struct {
+	Rides any `json:"rides"`
+	Total int `json:"total"`
+	Page  int `json:"page"`
+	Limit int `json:"limit"`
 }

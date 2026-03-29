@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -19,7 +19,7 @@ func (s *Server) AdminGetSettingsHandler(c *gin.Context) {
 	settings, err := s.db.GetAdminSettings(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get settings"})
-		log.Printf("get admin settings error: %v", err)
+		slog.Error("failed to get admin settings", "error", err)
 		return
 	}
 	c.Data(http.StatusOK, "application/json", settings)
@@ -37,7 +37,7 @@ func (s *Server) AdminUpdateSettingsHandler(c *gin.Context) {
 	}
 	if err := s.db.UpsertAdminSettings(c.Request.Context(), body); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save settings"})
-		log.Printf("upsert admin settings error: %v", err)
+		slog.Error("failed to upsert admin settings", "error", err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -68,7 +68,7 @@ func (s *Server) AdminUpdateMatchingParamsHandler(c *gin.Context) {
 	}
 	if err := s.db.UpsertMatchingParams(c.Request.Context(), data); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save params"})
-		log.Printf("upsert matching params error: %v", err)
+		slog.Error("failed to upsert matching params", "error", err)
 		return
 	}
 
@@ -103,7 +103,7 @@ func (s *Server) AdminListRidesHandler(c *gin.Context) {
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rides"})
-		log.Printf("admin list rides error: %v", err)
+		slog.Error("failed to list admin rides", "error", err)
 		return
 	}
 
@@ -140,7 +140,7 @@ func (s *Server) AdminGetRideHandler(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "ride not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get ride"})
-			log.Printf("admin get ride error: %v", err)
+			slog.Error("failed to get admin ride detail", "ride_id", rideID, "error", err)
 		}
 		return
 	}
@@ -188,7 +188,7 @@ func (s *Server) AdminMatchingStatsHandler(c *gin.Context) {
 	stats, err := s.db.GetMatchingStats(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats"})
-		log.Printf("admin matching stats error: %v", err)
+		slog.Error("failed to get matching stats", "error", err)
 		return
 	}
 
@@ -225,7 +225,7 @@ func (s *Server) AdminActiveDriversHandler(c *gin.Context) {
 	resp, err := s.location.ProxyRequest(req)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "location service unavailable"})
-		log.Printf("admin active drivers error: %v", err)
+		slog.Error("location service unavailable for active drivers", "error", err)
 		return
 	}
 	defer resp.Body.Close()
@@ -233,7 +233,7 @@ func (s *Server) AdminActiveDriversHandler(c *gin.Context) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read location service response"})
-		log.Printf("admin active drivers read error: %v", err)
+		slog.Error("failed to read location service response", "error", err)
 		return
 	}
 	c.Data(resp.StatusCode, "application/json", body)
