@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 
@@ -28,14 +28,15 @@ func Load() *Config {
 	if err != nil || port == 0 {
 		port = 8081
 		if os.Getenv("PORT") != "" {
-			log.Printf("WARNING: invalid PORT %q, defaulting to %d", os.Getenv("PORT"), port)
+			slog.Warn("invalid PORT, using default", "port_value", os.Getenv("PORT"), "default", port)
 		}
 	}
 
 	// Validate critical environment variables
 	for _, key := range []string{"JWT_SECRET_KEY", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME"} {
 		if os.Getenv(key) == "" {
-			log.Fatalf("%s environment variable is required", key)
+			slog.Error("required environment variable is missing", "key", key)
+			os.Exit(1)
 		}
 	}
 

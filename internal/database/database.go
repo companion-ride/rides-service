@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -217,7 +218,8 @@ func New(connStr string) Service {
 	dbOnce.Do(func() {
 		db, err := sql.Open("pgx", connStr)
 		if err != nil {
-			log.Fatal(err)
+			slog.Error("failed to open database connection", "error", err)
+			os.Exit(1)
 		}
 		db.SetMaxOpenConns(25)
 		db.SetMaxIdleConns(5)
@@ -269,7 +271,7 @@ func (s *service) Health() map[string]string {
 }
 
 func (s *service) Close() error {
-	log.Println("Disconnected from database")
+	slog.Info("disconnected from database")
 	return s.db.Close()
 }
 

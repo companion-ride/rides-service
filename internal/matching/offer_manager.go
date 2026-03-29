@@ -2,7 +2,7 @@ package matching
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -85,9 +85,11 @@ func haversine(lat1, lon1, lat2, lon2 float64) float64 {
 // HandleRideRequest processes a new passenger ride request.
 func (om *OfferManager) HandleRideRequest(ctx context.Context, msg InboundMessage) {
 	if msg.Pickup == nil || msg.Dropoff == nil {
-		log.Printf("ride request missing pickup/dropoff, request_id=%s", msg.RequestID)
+		slog.Warn("ride request missing pickup/dropoff", "request_id", msg.RequestID)
 		return
 	}
+
+	slog.Info("ride request received", "request_id", msg.RequestID, "passenger_id", msg.PassengerID)
 
 	mp := om.params.Get()
 
@@ -101,12 +103,13 @@ func (om *OfferManager) HandleRideRequest(ctx context.Context, msg InboundMessag
 		MaxResults:    20,
 	})
 	if err != nil {
-		log.Printf("matching query error: %v", err)
+		slog.Error("failed to find matching rides", "request_id", msg.RequestID, "error", err)
 		om.sendNoMatch(ctx, msg.RequestID, msg.PassengerID)
 		return
 	}
 
 	if len(candidates) == 0 {
+		slog.Info("no matching rides found", "request_id", msg.RequestID, "passenger_id", msg.PassengerID)
 		om.sendNoMatch(ctx, msg.RequestID, msg.PassengerID)
 		return
 	}
@@ -150,7 +153,7 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 	}
 	if currentOffer.DriverID != msg.UserID {
 		om.mu.Unlock()
-		log.Printf("user %s attempted to respond to offer for driver %s", msg.UserID, currentOffer.DriverID)
+		slog.Warn("user attempted to respond to offer for another driver", "user_id", msg.UserID, "driver_id", currentOffer.DriverID, "request_id", msg.RequestID)
 		return
 	}
 	if req.OfferTimer != nil {
@@ -180,16 +183,16 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 
 		if err := om.db.CreateSubRideWithCapacityCheck(ctx, sr); err != nil {
 			if err == database.ErrRideAtCapacity {
-				log.Printf("ride %s at capacity, trying next driver", currentOffer.RideID)
+				slog.Warn("ride at capacity, trying next driver", "ride_id", currentOffer.RideID, "request_id", msg.RequestID)
 				om.offerToNextDriver(ctx, msg.RequestID)
 				return
 			}
-			log.Printf("create sub-ride error: %v", err)
+			slog.Error("failed to create sub-ride", "ride_id", currentOffer.RideID, "request_id", msg.RequestID, "error", err)
 			om.offerToNextDriver(ctx, msg.RequestID)
 			return
 		}
 
-		om.producer.Send(ctx, TopicDriverAssigned, req.PassengerID, DriverAssignedMessage{
+		if err := om.producer.Send(ctx, TopicDriverAssigned, req.PassengerID, DriverAssignedMessage{
 			RideID:       currentOffer.RideID,
 			PassengerID:  req.PassengerID,
 			DriverID:     currentOffer.DriverID,
@@ -198,7 +201,11 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 			DropoffPoint: OutboundCoord{Lat: currentOffer.DropoffPointLat, Lon: currentOffer.DropoffPointLon},
 			PickupWalkM:  currentOffer.PickupWalkM,
 			DropoffWalkM: currentOffer.DropoffWalkM,
-		})
+		}); err != nil {
+			slog.Error("failed to send driver assigned", "ride_id", currentOffer.RideID, "passenger_id", req.PassengerID, "error", err)
+		}
+
+		slog.Info("driver accepted ride", "ride_id", currentOffer.RideID, "driver_id", currentOffer.DriverID, "passenger_id", req.PassengerID, "sub_ride_id", sr.SubRideID, "request_id", msg.RequestID)
 
 		om.mu.Lock()
 		om.cleanup(msg.RequestID)
@@ -207,6 +214,7 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 	}
 
 	// Driver rejected — try next
+	slog.Info("driver rejected offer", "driver_id", msg.UserID, "request_id", msg.RequestID)
 	om.offerToNextDriver(ctx, msg.RequestID)
 }
 
@@ -220,7 +228,7 @@ func (om *OfferManager) HandleSearchCancel(ctx context.Context, msg InboundMessa
 	}
 	if msg.UserID != req.PassengerID {
 		om.mu.Unlock()
-		log.Printf("user %s attempted to cancel search for passenger %s", msg.UserID, req.PassengerID)
+		slog.Warn("user attempted to cancel search for another passenger", "user_id", msg.UserID, "passenger_id", req.PassengerID, "request_id", msg.RequestID)
 		return
 	}
 	currentOffer := req.CurrentOffer
@@ -229,13 +237,17 @@ func (om *OfferManager) HandleSearchCancel(ctx context.Context, msg InboundMessa
 	om.mu.Unlock()
 
 	if currentOffer != nil {
-		om.producer.Send(ctx, TopicRideNotifications, currentOffer.DriverID, NotificationMessage{
+		if err := om.producer.Send(ctx, TopicRideNotifications, currentOffer.DriverID, NotificationMessage{
 			UserID:      currentOffer.DriverID,
 			Event:       "search_cancelled",
 			RequestID:   msg.RequestID,
 			PassengerID: passengerID,
-		})
+		}); err != nil {
+			slog.Error("failed to send search cancelled notification", "driver_id", currentOffer.DriverID, "request_id", msg.RequestID, "error", err)
+		}
 	}
+
+	slog.Info("search cancelled", "request_id", msg.RequestID, "passenger_id", passengerID)
 }
 
 // offerToNextDriver finds the next eligible candidate and sends an offer.
@@ -253,6 +265,7 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 			passengerID := req.PassengerID
 			om.cleanup(requestID)
 			om.mu.Unlock()
+			slog.Info("no more candidates available", "request_id", requestID, "passenger_id", passengerID)
 			om.sendNoMatch(ctx, requestID, passengerID)
 			return
 		}
@@ -263,7 +276,7 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 		// Filter checks (no lock held — may do HTTP/DB calls)
 		count, err := om.db.CountActiveSubRides(ctx, cand.RideID)
 		if err != nil {
-			log.Printf("count sub-rides error: %v", err)
+			slog.Error("failed to count active sub-rides", "ride_id", cand.RideID, "error", err)
 			continue
 		}
 		if count >= cand.MaxPassengers {
@@ -319,7 +332,11 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 		}
 		om.mu.Unlock()
 
-		om.producer.Send(ctx, TopicRideNotifications, cand.DriverID, offer)
+		if err := om.producer.Send(ctx, TopicRideNotifications, cand.DriverID, offer); err != nil {
+			slog.Error("failed to send ride offer", "driver_id", cand.DriverID, "request_id", requestID, "error", err)
+		}
+
+		slog.Info("offer sent to driver", "driver_id", cand.DriverID, "ride_id", cand.RideID, "request_id", requestID)
 		return
 	}
 }
@@ -334,12 +351,16 @@ func (om *OfferManager) onOfferTimeout(requestID, driverID string) {
 	req.CurrentOffer = nil
 	om.mu.Unlock()
 
+	slog.Info("offer expired", "request_id", requestID, "driver_id", driverID)
+
 	ctx := context.Background()
-	om.producer.Send(ctx, TopicRideNotifications, driverID, NotificationMessage{
+	if err := om.producer.Send(ctx, TopicRideNotifications, driverID, NotificationMessage{
 		UserID:    driverID,
 		Event:     "offer_expired",
 		RequestID: requestID,
-	})
+	}); err != nil {
+		slog.Error("failed to send offer expired notification", "driver_id", driverID, "request_id", requestID, "error", err)
+	}
 	om.offerToNextDriver(ctx, requestID)
 }
 
@@ -357,12 +378,14 @@ func (om *OfferManager) onOverallTimeout(requestID string) {
 }
 
 func (om *OfferManager) sendNoMatch(ctx context.Context, requestID, passengerID string) {
-	om.producer.Send(ctx, TopicRideNotifications, passengerID, NotificationMessage{
+	if err := om.producer.Send(ctx, TopicRideNotifications, passengerID, NotificationMessage{
 		UserID:    passengerID,
 		Event:     "ride_no_match",
 		RequestID: requestID,
 		Reason:    "no_drivers_available",
-	})
+	}); err != nil {
+		slog.Error("failed to send no match notification", "passenger_id", passengerID, "request_id", requestID, "error", err)
+	}
 }
 
 // cleanup removes a pending request and stops its timers.

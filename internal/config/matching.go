@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"sync/atomic"
 	"time"
 )
@@ -64,7 +64,7 @@ func (l *MatchingParamsLoader) StartPeriodicReload(ctx context.Context, interval
 			case <-ticker.C:
 				p, err := load(ctx)
 				if err != nil {
-					log.Printf("matching params reload failed, keeping previous: %v", err)
+					slog.Warn("matching params reload failed, keeping previous", "error", err)
 					continue
 				}
 				if p != nil {

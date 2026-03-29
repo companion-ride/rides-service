@@ -2,7 +2,7 @@ package kafka
 
 import (
 	"context"
-	"log"
+	"log/slog"
 
 	"github.com/segmentio/kafka-go"
 )
@@ -31,15 +31,15 @@ func NewConsumer(brokers, groupID, topic string, handler MessageHandler) *Consum
 // Start reads messages in a loop until ctx is cancelled.
 // Call this in a goroutine.
 func (c *Consumer) Start(ctx context.Context) {
-	log.Printf("kafka consumer started for topic %q", c.reader.Config().Topic)
+	slog.Info("kafka consumer started", "topic", c.reader.Config().Topic)
 	for {
 		msg, err := c.reader.ReadMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log.Println("kafka consumer stopped")
+				slog.Info("kafka consumer stopped")
 				return
 			}
-			log.Printf("kafka read error: %v", err)
+			slog.Error("kafka read error", "error", err)
 			continue
 		}
 		c.handler(ctx, msg.Value)
