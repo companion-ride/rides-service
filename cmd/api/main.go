@@ -14,6 +14,9 @@ import (
 
 	"rides/internal/config"
 	"rides/internal/database"
+	kafkapkg "rides/internal/kafka"
+	"rides/internal/location"
+	"rides/internal/matching"
 	"rides/internal/server"
 )
 
@@ -70,7 +73,7 @@ func deregisterFromGateway() {
 	log.Printf("deregistered from api-gateway: %s", _serviceName)
 }
 
-func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, done chan bool) {
+func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, kafkaCancel context.CancelFunc, consumer *kafkapkg.Consumer, producer *kafkapkg.Producer, done chan bool) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -80,7 +83,15 @@ func gracefulShutdown(apiServer *http.Server, reloadCancel context.CancelFunc, d
 	stop()
 
 	reloadCancel()
+	kafkaCancel()
 	deregisterFromGateway()
+
+	if consumer != nil {
+		consumer.Close()
+	}
+	if producer != nil {
+		producer.Close()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -139,12 +150,34 @@ func main() {
 		return &p, nil
 	})
 
+	// Kafka setup
+	var kafkaConsumer *kafkapkg.Consumer
+	var kafkaProducer *kafkapkg.Producer
+	kafkaCtx, kafkaCancel := context.WithCancel(context.Background())
+
+	if cfg.KafkaBootstrapServers != "" {
+		kafkaProducer = kafkapkg.NewProducer(cfg.KafkaBootstrapServers)
+		locClient := location.NewClient(cfg.LocationServiceURL)
+
+		offerMgr := matching.NewOfferManager(kafkaProducer, db, locClient, mpLoader)
+		handler := matching.NewHandler(offerMgr, db, kafkaProducer)
+
+		kafkaConsumer = kafkapkg.NewConsumer(
+			cfg.KafkaBootstrapServers,
+			"rides-service",
+			matching.TopicRideRequests,
+			handler.HandleMessage,
+		)
+		go kafkaConsumer.Start(kafkaCtx)
+		log.Println("Kafka consumer started")
+	}
+
 	srv := server.NewServer(cfg, db, mpLoader)
 
 	registerWithGateway(cfg.Port)
 
 	done := make(chan bool, 1)
-	go gracefulShutdown(srv, reloadCancel, done)
+	go gracefulShutdown(srv, reloadCancel, kafkaCancel, kafkaConsumer, kafkaProducer, done)
 
 	log.Printf("Starting rides service on port %d", cfg.Port)
 	err := srv.ListenAndServe()
