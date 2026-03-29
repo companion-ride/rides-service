@@ -231,6 +231,10 @@ func (h *Handler) handleRideCancel(ctx context.Context, msg InboundMessage) {
 		return
 	}
 
+	if err := h.db.CancelActiveSubRides(ctx, msg.RideID); err != nil {
+		log.Printf("cancel sub-rides error: %v", err)
+	}
+
 	if err := h.db.UpdateRideStatus(ctx, msg.RideID, database.StatusCancelled); err != nil {
 		log.Printf("update ride status error: %v", err)
 		return

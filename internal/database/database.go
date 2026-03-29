@@ -184,6 +184,7 @@ type Service interface {
 	GetSubRide(ctx context.Context, subRideID string) (*SubRide, error)
 	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
 	UpdateSubRideStatus(ctx context.Context, subRideID, status string) error
+	CancelActiveSubRides(ctx context.Context, rideID string) error
 	AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error)
 
 	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
@@ -658,6 +659,15 @@ func (s *service) UpdateSubRideStatus(ctx context.Context, subRideID, status str
 	}
 	query += ` WHERE sub_ride_id = $2`
 	_, err := s.db.ExecContext(ctx, query, status, subRideID)
+	return err
+}
+
+func (s *service) CancelActiveSubRides(ctx context.Context, rideID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sub_rides SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+		 WHERE ride_id = $1 AND status IN ('pending', 'picked_up')`,
+		rideID,
+	)
 	return err
 }
 

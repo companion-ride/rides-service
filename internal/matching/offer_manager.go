@@ -148,6 +148,11 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 		om.mu.Unlock()
 		return // no active offer (race with timeout)
 	}
+	if currentOffer.DriverID != msg.UserID {
+		om.mu.Unlock()
+		log.Printf("user %s attempted to respond to offer for driver %s", msg.UserID, currentOffer.DriverID)
+		return
+	}
 	if req.OfferTimer != nil {
 		req.OfferTimer.Stop()
 	}
@@ -211,6 +216,11 @@ func (om *OfferManager) HandleSearchCancel(ctx context.Context, msg InboundMessa
 	req, ok := om.pending[msg.RequestID]
 	if !ok {
 		om.mu.Unlock()
+		return
+	}
+	if msg.UserID != req.PassengerID {
+		om.mu.Unlock()
+		log.Printf("user %s attempted to cancel search for passenger %s", msg.UserID, req.PassengerID)
 		return
 	}
 	currentOffer := req.CurrentOffer
