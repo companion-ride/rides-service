@@ -58,7 +58,7 @@ func (s *Server) ListRidesHandler(c *gin.Context) {
 
 func (s *Server) GetRouteHandler(c *gin.Context) {
 	routeID := c.Param("id")
-	route, err := s.pathfinder.GetRoute(c.Request.Context(), routeID)
+	route, err := s.pathfinder.GetRoute(c.Request.Context(), c.GetHeader("Authorization"), routeID)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to get route: " + err.Error()})
 		return
@@ -79,7 +79,7 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 	}
 
 	// Call pathfinder to create the driving route
-	routeResp, err := s.pathfinder.CreateRoute(c.Request.Context(),
+	routeResp, err := s.pathfinder.CreateRoute(c.Request.Context(), c.GetHeader("Authorization"),
 		req.Start.Lat, req.Start.Lon, req.Finish.Lat, req.Finish.Lon,
 	)
 	if err != nil {
@@ -105,12 +105,12 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 		FinishLat:     req.Finish.Lat,
 		FinishLon:     req.Finish.Lon,
 		TotalDuration: totalDuration,
-		Status:        "pending",
+		Status:        database.StatusPending,
 	}
 
 	if err := s.db.CreateRide(c.Request.Context(), ride); err != nil {
+		log.Printf("ORPHANED ROUTE: pathfinder route %s created but local ride insert failed: %v", routeResp.RouteID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save ride"})
-		log.Printf("create ride error: %v", err)
 		return
 	}
 
@@ -200,7 +200,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 
 	// Get walking directions from pathfinder
 	var walkPath *WalkPath
-	walkResp, err := s.pathfinder.WalkToClosest(c.Request.Context(),
+	walkResp, err := s.pathfinder.WalkToClosest(c.Request.Context(), c.GetHeader("Authorization"),
 		match.RouteID, req.Pickup.Lat, req.Pickup.Lon,
 	)
 	if err != nil {
@@ -228,7 +228,7 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		StartLon:    match.PickupPointLon,
 		FinishLat:   match.DropoffPointLat,
 		FinishLon:   match.DropoffPointLon,
-		Status:      "pending",
+		Status:      database.StatusPending,
 	}
 
 	if err := s.db.CreateSubRide(c.Request.Context(), subRide); err != nil {
@@ -258,22 +258,26 @@ func segmentsToWKT(segments []pathfinder.Segment) string {
 			points = append(points, fmt.Sprintf("%f %f", coord.Lon, coord.Lat))
 		}
 	}
-	if len(points) == 0 {
+	if len(points) < 2 {
 		return ""
 	}
 	return "LINESTRING(" + strings.Join(points, ",") + ")"
 }
 
-// parseDuration converts pathfinder duration strings like "12 min" or "1 h 5 min" to seconds.
+// parseDuration converts pathfinder duration strings like "12 min", "1 h", or "1 h 5 min" to seconds.
 func parseDuration(s string) int {
 	s = strings.TrimSpace(s)
 	var hours, mins int
 	if n, _ := fmt.Sscanf(s, "%d h %d min", &hours, &mins); n == 2 {
 		return hours*3600 + mins*60
 	}
+	if n, _ := fmt.Sscanf(s, "%d h", &hours); n == 1 {
+		return hours * 3600
+	}
 	if n, _ := fmt.Sscanf(s, "%d min", &mins); n == 1 {
 		return mins * 60
 	}
+	log.Printf("unrecognized duration format: %q", s)
 	return 0
 }
 
@@ -289,7 +293,7 @@ func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 		return
 	}
 
-	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, req.Lat, req.Lon); err != nil {
+	if err := s.location.SetLocation(c.Request.Context(), req.DriverID, "driver", req.Lat, req.Lon); err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to set location: " + err.Error()})
 		log.Printf("set driver location error: %v", err)
 		return

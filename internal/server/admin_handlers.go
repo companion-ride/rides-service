@@ -26,7 +26,7 @@ func (s *Server) AdminGetSettingsHandler(c *gin.Context) {
 }
 
 func (s *Server) AdminUpdateSettingsHandler(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 64*1024)) // 64KB max
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
 		return
@@ -230,7 +230,12 @@ func (s *Server) AdminActiveDriversHandler(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to read location service response"})
+		log.Printf("admin active drivers read error: %v", err)
+		return
+	}
 	c.Data(resp.StatusCode, "application/json", body)
 }
 

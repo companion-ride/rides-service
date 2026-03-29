@@ -55,17 +55,23 @@ type WalkResponse struct {
 	RawWalkResponse json.RawMessage `json:"raw_walk_response"`
 }
 
-func (c *Client) CreateRoute(ctx context.Context, startLat, startLon, finishLat, finishLon float64) (*RouteResponse, error) {
-	body, _ := json.Marshal(map[string]interface{}{
+func (c *Client) CreateRoute(ctx context.Context, authHeader string, startLat, startLon, finishLat, finishLon float64) (*RouteResponse, error) {
+	body, err := json.Marshal(map[string]any{
 		"point_a": map[string]float64{"lat": startLat, "lon": startLon},
 		"point_b": map[string]float64{"lat": finishLat, "lon": finishLon},
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling request: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/routes", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -84,10 +90,13 @@ func (c *Client) CreateRoute(ctx context.Context, startLat, startLon, finishLat,
 	return &result, nil
 }
 
-func (c *Client) GetRoute(ctx context.Context, routeID string) (*RouteResponse, error) {
+func (c *Client) GetRoute(ctx context.Context, authHeader string, routeID string) (*RouteResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/routes/"+routeID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -107,14 +116,20 @@ func (c *Client) GetRoute(ctx context.Context, routeID string) (*RouteResponse, 
 	return &result, nil
 }
 
-func (c *Client) WalkToClosest(ctx context.Context, routeID string, lat, lon float64) (*WalkResponse, error) {
-	body, _ := json.Marshal(map[string]float64{"lat": lat, "lon": lon})
+func (c *Client) WalkToClosest(ctx context.Context, authHeader string, routeID string, lat, lon float64) (*WalkResponse, error) {
+	body, err := json.Marshal(map[string]float64{"lat": lat, "lon": lon})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling request: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/routes/"+routeID+"/walk-to-closest", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
