@@ -47,7 +47,7 @@ type WalkCoord struct {
 }
 
 type SetDriverLocationRequest struct {
-	DriverID string  `json:"driver_id" binding:"required"`
-	Lat      float64 `json:"lat" binding:"required"`
-	Lon      float64 `json:"lon" binding:"required"`
+	DriverID string  `json:"driver_id" binding:"required,uuid"`
+	Lat      float64 `json:"lat" binding:"required,min=-90,max=90"`
+	Lon      float64 `json:"lon" binding:"required,min=-180,max=180"`
 }
