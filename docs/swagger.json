@@ -178,6 +178,207 @@
                     }
                 }
             }
+        },
+        "/driver/location": {
+            "post": {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["rides"],
+                "summary": "Set driver location",
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {"$ref": "#/definitions/SetDriverLocationRequest"}
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/rides": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "List rides (paginated)",
+                "parameters": [
+                    {"type": "integer", "name": "page", "in": "query", "description": "Page number (default 1)"},
+                    {"type": "integer", "name": "limit", "in": "query", "description": "Items per page (default 20, max 100)"},
+                    {"type": "string", "name": "status", "in": "query", "description": "Filter by ride status"},
+                    {"type": "string", "name": "search", "in": "query", "description": "Search by driver/ride ID"}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"$ref": "#/definitions/AdminRideListResponse"}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/rides/{id}": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Get ride detail with sub-rides",
+                "parameters": [
+                    {"type": "string", "name": "id", "in": "path", "required": true, "description": "Ride ID"}
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"$ref": "#/definitions/AdminRideDetailResponse"}
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/matching/stats": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Matching statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"$ref": "#/definitions/MatchingStatsResponse"}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/matching/params": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Get matching parameters",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"$ref": "#/definitions/MatchingParamsResponse"}
+                    }
+                }
+            },
+            "put": {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Update matching parameters",
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {"$ref": "#/definitions/MatchingParamsRequest"}
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/settings": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Get admin settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"type": "object", "additionalProperties": {}}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            },
+            "put": {
+                "consumes": ["application/json"],
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Update admin settings",
+                "parameters": [
+                    {
+                        "in": "body",
+                        "name": "body",
+                        "required": true,
+                        "schema": {"type": "object", "additionalProperties": {}}
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
+        },
+        "/admin/drivers/active": {
+            "get": {
+                "produces": ["application/json"],
+                "tags": ["admin"],
+                "summary": "Active drivers (proxied from location-service)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {"type": "array", "items": {"type": "object", "additionalProperties": {}}}
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -235,6 +436,112 @@
                 "dropoff_walk_m": {"type": "number"},
                 "total_walk_m":   {"type": "number"},
                 "walk_to_pickup": {"$ref": "#/definitions/WalkPath"}
+            }
+        },
+        "SetDriverLocationRequest": {
+            "type": "object",
+            "required": ["driver_id", "lat", "lon"],
+            "properties": {
+                "driver_id": {"type": "string", "format": "uuid"},
+                "lat": {"type": "number", "minimum": -90, "maximum": 90},
+                "lon": {"type": "number", "minimum": -180, "maximum": 180}
+            }
+        },
+        "AdminRideListItem": {
+            "type": "object",
+            "properties": {
+                "id":            {"type": "string"},
+                "driverId":      {"type": "string"},
+                "fromAddress":   {"type": "string"},
+                "toAddress":     {"type": "string"},
+                "status":        {"type": "string"},
+                "price":         {"type": "integer"},
+                "distanceM":     {"type": "integer"},
+                "totalDuration": {"type": "integer"},
+                "paymentMethod": {"type": "string"},
+                "passengers":    {"type": "integer"},
+                "createdAt":     {"type": "string", "format": "date-time"}
+            }
+        },
+        "AdminRideListResponse": {
+            "type": "object",
+            "properties": {
+                "rides": {"type": "array", "items": {"$ref": "#/definitions/AdminRideListItem"}},
+                "total": {"type": "integer"},
+                "page":  {"type": "integer"},
+                "limit": {"type": "integer"}
+            }
+        },
+        "AdminSubRideItem": {
+            "type": "object",
+            "properties": {
+                "subRideId":   {"type": "string"},
+                "passengerId": {"type": "string"},
+                "pickupLat":   {"type": "number"},
+                "pickupLon":   {"type": "number"},
+                "dropoffLat":  {"type": "number"},
+                "dropoffLon":  {"type": "number"},
+                "status":      {"type": "string"},
+                "completedAt": {"type": "string", "format": "date-time"},
+                "cancelledAt": {"type": "string", "format": "date-time"},
+                "createdAt":   {"type": "string", "format": "date-time"}
+            }
+        },
+        "AdminRideDetailResponse": {
+            "type": "object",
+            "properties": {
+                "id":            {"type": "string"},
+                "driverId":      {"type": "string"},
+                "routeId":       {"type": "string"},
+                "fromAddress":   {"type": "string"},
+                "toAddress":     {"type": "string"},
+                "status":        {"type": "string"},
+                "price":         {"type": "integer"},
+                "distanceM":     {"type": "integer"},
+                "totalDuration": {"type": "integer"},
+                "paymentMethod": {"type": "string"},
+                "startLat":      {"type": "number"},
+                "startLon":      {"type": "number"},
+                "finishLat":     {"type": "number"},
+                "finishLon":     {"type": "number"},
+                "startedAt":     {"type": "string", "format": "date-time"},
+                "completedAt":   {"type": "string", "format": "date-time"},
+                "cancelledAt":   {"type": "string", "format": "date-time"},
+                "createdAt":     {"type": "string", "format": "date-time"},
+                "subRides":      {"type": "array", "items": {"$ref": "#/definitions/AdminSubRideItem"}}
+            }
+        },
+        "MatchingStatsResponse": {
+            "type": "object",
+            "properties": {
+                "totalRides":           {"type": "integer"},
+                "ridesByStatus":        {"type": "object", "additionalProperties": {"type": "integer"}},
+                "matchRate":            {"type": "number"},
+                "avgWaitSeconds":       {"type": "number"},
+                "totalSubRides":        {"type": "integer"},
+                "avgPassengersPerRide": {"type": "number"},
+                "cancellationRate":     {"type": "number"}
+            }
+        },
+        "MatchingParamsRequest": {
+            "type": "object",
+            "required": ["pickupRadiusM", "dropoffRadiusM", "maxPassengers", "minEtaSeconds", "minDriverDistanceM"],
+            "properties": {
+                "pickupRadiusM":      {"type": "integer", "minimum": 100, "maximum": 10000},
+                "dropoffRadiusM":     {"type": "integer", "minimum": 100, "maximum": 10000},
+                "maxPassengers":      {"type": "integer", "minimum": 1, "maximum": 10},
+                "minEtaSeconds":      {"type": "integer", "minimum": 30, "maximum": 600},
+                "minDriverDistanceM": {"type": "integer", "minimum": 100, "maximum": 10000}
+            }
+        },
+        "MatchingParamsResponse": {
+            "type": "object",
+            "properties": {
+                "pickupRadiusM":      {"type": "number"},
+                "dropoffRadiusM":     {"type": "number"},
+                "maxPassengers":      {"type": "integer"},
+                "minEtaSeconds":      {"type": "integer"},
+                "minDriverDistanceM": {"type": "number"}
             }
         }
     }
