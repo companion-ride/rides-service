@@ -29,6 +29,17 @@ func NewHandler(
 	}
 }
 
+func (h *Handler) sendError(ctx context.Context, userID, rideID, message string) {
+	if err := h.producer.Send(ctx, TopicRideNotifications, userID, NotificationMessage{
+		UserID:  userID,
+		Event:   "ride_error",
+		RideID:  rideID,
+		Message: message,
+	}); err != nil {
+		slog.Error("failed to send ride_error", "user_id", userID, "ride_id", rideID, "error", err)
+	}
+}
+
 // HandleMessage deserializes and routes a raw Kafka message.
 func (h *Handler) HandleMessage(ctx context.Context, value []byte) {
 	var msg InboundMessage
@@ -67,10 +78,12 @@ func (h *Handler) handleRideStart(ctx context.Context, msg InboundMessage) {
 	}
 	if ride.DriverID != msg.UserID {
 		slog.Warn("user does not own ride", "user_id", msg.UserID, "ride_id", msg.RideID, "driver_id", ride.DriverID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "you do not own this ride")
 		return
 	}
 	if ride.Status != database.StatusPending {
 		slog.Warn("ride is not pending", "ride_id", msg.RideID, "status", ride.Status)
+		h.sendError(ctx, msg.UserID, msg.RideID, "ride is not in pending status")
 		return
 	}
 
@@ -99,20 +112,24 @@ func (h *Handler) handlePassengerPickup(ctx context.Context, msg InboundMessage)
 	}
 	if ride.DriverID != msg.UserID {
 		slog.Warn("user does not own ride", "user_id", msg.UserID, "ride_id", msg.RideID, "driver_id", ride.DriverID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "you do not own this ride")
 		return
 	}
 
 	sr, err := h.db.GetSubRide(ctx, msg.SubRideID)
 	if err != nil {
 		slog.Error("failed to get sub-ride", "sub_ride_id", msg.SubRideID, "error", err)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride not found")
 		return
 	}
 	if sr.RideID != msg.RideID {
 		slog.Warn("sub-ride does not belong to ride", "sub_ride_id", msg.SubRideID, "ride_id", msg.RideID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride does not belong to this ride")
 		return
 	}
 	if sr.Status != database.StatusPending {
 		slog.Warn("sub-ride is not pending", "sub_ride_id", msg.SubRideID, "status", sr.Status)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride is not in pending status")
 		return
 	}
 
@@ -142,20 +159,24 @@ func (h *Handler) handlePassengerDropoff(ctx context.Context, msg InboundMessage
 	}
 	if ride.DriverID != msg.UserID {
 		slog.Warn("user does not own ride", "user_id", msg.UserID, "ride_id", msg.RideID, "driver_id", ride.DriverID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "you do not own this ride")
 		return
 	}
 
 	sr, err := h.db.GetSubRide(ctx, msg.SubRideID)
 	if err != nil {
 		slog.Error("failed to get sub-ride", "sub_ride_id", msg.SubRideID, "error", err)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride not found")
 		return
 	}
 	if sr.RideID != msg.RideID {
 		slog.Warn("sub-ride does not belong to ride", "sub_ride_id", msg.SubRideID, "ride_id", msg.RideID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride does not belong to this ride")
 		return
 	}
 	if sr.Status != database.StatusPickedUp {
 		slog.Warn("sub-ride is not picked up", "sub_ride_id", msg.SubRideID, "status", sr.Status)
+		h.sendError(ctx, msg.UserID, msg.RideID, "sub-ride is not in picked_up status")
 		return
 	}
 
@@ -185,10 +206,12 @@ func (h *Handler) handleRideFinish(ctx context.Context, msg InboundMessage) {
 	}
 	if ride.DriverID != msg.UserID {
 		slog.Warn("user does not own ride", "user_id", msg.UserID, "ride_id", msg.RideID, "driver_id", ride.DriverID)
+		h.sendError(ctx, msg.UserID, msg.RideID, "you do not own this ride")
 		return
 	}
 	if ride.Status != database.StatusActive {
 		slog.Warn("ride is not active", "ride_id", msg.RideID, "status", ride.Status)
+		h.sendError(ctx, msg.UserID, msg.RideID, "ride is not in active status")
 		return
 	}
 
@@ -248,6 +271,7 @@ func (h *Handler) handleRideCancel(ctx context.Context, msg InboundMessage) {
 
 	if ride.Status == database.StatusCompleted || ride.Status == database.StatusCancelled {
 		slog.Warn("ride already in terminal state", "ride_id", msg.RideID, "status", ride.Status)
+		h.sendError(ctx, msg.UserID, msg.RideID, "ride is already "+ride.Status)
 		return
 	}
 
