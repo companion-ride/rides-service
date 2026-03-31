@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"rides/internal/config"
+	"rides/internal/configclient"
 	"rides/internal/database"
 	kafkapkg "rides/internal/kafka"
 	"rides/internal/location"
@@ -129,32 +130,60 @@ func main() {
 
 	db := database.New(connStr)
 
-	// Initialize matching params from DB, falling back to env var defaults
+	// Initialize matching params with defaults
 	defaults := config.DefaultMatchingParams()
 	mpLoader := config.NewMatchingParamsLoader(defaults)
 
-	// Try to load from DB (ignore error on first run — table may not exist yet)
+	// Config-service integration: try initial fetch, fall back to DB, then env defaults
 	ctx := context.Background()
-	if raw, err := db.GetMatchingParams(ctx); err == nil && raw != nil && string(raw) != "{}" {
-		var p config.MatchingParams
-		if err := json.Unmarshal(raw, &p); err == nil && p.MaxPassengers > 0 {
-			mpLoader.Store(&p)
-		}
-	}
-
-	// Start background reload (every 2 minutes)
 	reloadCtx, reloadCancel := context.WithCancel(context.Background())
-	mpLoader.StartPeriodicReload(reloadCtx, 2*time.Minute, func(ctx context.Context) (*config.MatchingParams, error) {
-		raw, err := db.GetMatchingParams(ctx)
-		if err != nil || raw == nil {
-			return nil, err
+
+	configURL := os.Getenv("CONFIG_SERVICE_URL")
+	configKey := os.Getenv("CONFIG_SERVICE_API_KEY")
+	if configURL != "" && configKey != "" {
+		cc := configclient.New(configURL, configKey, "rides")
+		raw, changed, err := cc.Fetch(ctx)
+		if err != nil {
+			slog.Warn("config-service unavailable at startup, using defaults", "error", err)
+		} else if changed {
+			var p config.MatchingParams
+			if err := json.Unmarshal(raw, &p); err == nil && p.MaxPassengers > 0 {
+				mpLoader.Store(&p)
+				slog.Info("loaded matching params from config-service")
+			}
 		}
-		var p config.MatchingParams
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, err
+
+		// Start polling every 30 seconds
+		cc.StartPolling(reloadCtx, 30*time.Second, func(raw json.RawMessage) {
+			var p config.MatchingParams
+			if err := json.Unmarshal(raw, &p); err != nil {
+				slog.Error("failed to unmarshal config update", "error", err)
+				return
+			}
+			if p.MaxPassengers > 0 {
+				mpLoader.Store(&p)
+			}
+		})
+	} else {
+		// No config-service configured — fall back to DB reload (existing behavior)
+		if raw, err := db.GetMatchingParams(ctx); err == nil && raw != nil && string(raw) != "{}" {
+			var p config.MatchingParams
+			if err := json.Unmarshal(raw, &p); err == nil && p.MaxPassengers > 0 {
+				mpLoader.Store(&p)
+			}
 		}
-		return &p, nil
-	})
+		mpLoader.StartPeriodicReload(reloadCtx, 2*time.Minute, func(ctx context.Context) (*config.MatchingParams, error) {
+			raw, err := db.GetMatchingParams(ctx)
+			if err != nil || raw == nil {
+				return nil, err
+			}
+			var p config.MatchingParams
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, err
+			}
+			return &p, nil
+		})
+	}
 
 	// Kafka setup
 	var kafkaConsumer *kafkapkg.Consumer
