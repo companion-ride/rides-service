@@ -176,27 +176,13 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 			continue
 		}
 
-		// Distance check: skip if driver is too close to pickup
+		// Route-based check: has driver already passed the pickup?
 		loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
 		if locErr == nil {
-			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
-			if dist < mp.MinDriverDistanceM {
-				slog.Info("driver too close, skipping", "driver_id", cand.DriverID, "distance_m", dist, "min_distance_m", mp.MinDriverDistanceM)
-				continue
-			}
-
-			// Route-based check: has driver already passed the pickup?
 			driverFrac, fracErr := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
-			if fracErr == nil {
-				if driverFrac >= cand.PickupFrac {
-					slog.Info("driver already passed pickup, skipping", "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac)
-					continue
-				}
-				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
-				if etaSeconds < float64(mp.MinETASeconds) {
-					slog.Info("driver ETA too short, skipping", "driver_id", cand.DriverID, "eta_seconds", etaSeconds, "min_eta_seconds", mp.MinETASeconds)
-					continue
-				}
+			if fracErr == nil && driverFrac >= cand.PickupFrac {
+				slog.Info("driver already passed pickup, skipping", "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac)
+				continue
 			}
 		}
 
