@@ -252,8 +252,6 @@ func (om *OfferManager) HandleSearchCancel(ctx context.Context, msg InboundMessa
 
 // offerToNextDriver finds the next eligible candidate and sends an offer.
 func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string) {
-	mp := om.params.Get()
-
 	for {
 		om.mu.Lock()
 		req, ok := om.pending[requestID]
@@ -286,26 +284,11 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 
 		loc, locErr := om.location.GetCurrentLocation(ctx, cand.DriverID)
 		if locErr == nil {
-			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
-			if dist < mp.MinDriverDistanceM {
-				slog.Info("skipping candidate: driver too close to pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "distance_m", dist, "min_distance_m", mp.MinDriverDistanceM, "request_id", requestID)
+			driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
+			if fracErr == nil && driverFrac >= cand.PickupFrac {
+				slog.Info("skipping candidate: driver already passed pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac, "request_id", requestID)
 				continue
 			}
-
-			driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
-			if fracErr == nil {
-				if driverFrac >= cand.PickupFrac {
-					slog.Info("skipping candidate: driver already passed pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac, "request_id", requestID)
-					continue
-				}
-				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
-				if etaSeconds < float64(mp.MinETASeconds) {
-					slog.Info("skipping candidate: ETA too short", "ride_id", cand.RideID, "driver_id", cand.DriverID, "eta_seconds", etaSeconds, "min_eta_seconds", mp.MinETASeconds, "request_id", requestID)
-					continue
-				}
-			}
-		} else {
-			slog.Info("candidate location unavailable, skipping location filters", "driver_id", cand.DriverID, "error", locErr)
 		}
 
 		// Send offer under lock
