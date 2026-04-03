@@ -58,6 +58,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 	admin.GET("/settings", s.AdminGetSettingsHandler)
 	admin.PUT("/settings", s.AdminUpdateSettingsHandler)
 	admin.GET("/drivers/active", s.AdminActiveDriversHandler)
+	admin.DELETE("/rides", s.AdminDeleteAllRidesHandler)
 
 	return r
 }

@@ -250,3 +250,14 @@ func queryIntOrDefault(c *gin.Context, key string, def int) int {
 	}
 	return n
 }
+
+func (s *Server) AdminDeleteAllRidesHandler(c *gin.Context) {
+	ctx := c.Request.Context()
+	if _, err := s.db.DeleteAllRides(ctx); err != nil {
+		slog.Error("failed to delete all rides", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete rides"})
+		return
+	}
+	slog.Info("all rides deleted by admin")
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}

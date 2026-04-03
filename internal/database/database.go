@@ -193,6 +193,7 @@ type Service interface {
 	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
 	ListActiveRides(ctx context.Context) ([]Ride, error)
 
+	DeleteAllRides(ctx context.Context) (int, error)
 	CancelExpiredRides(ctx context.Context) (int, error)
 	GetDriverRideHistory(ctx context.Context, driverID string, limit, offset int) ([]DriverRideHistoryRow, int, error)
 	GetPassengerRideHistory(ctx context.Context, passengerID string, limit, offset int) ([]PassengerRideHistoryRow, int, error)
@@ -674,6 +675,18 @@ func (s *service) CancelActiveSubRides(ctx context.Context, rideID string) error
 		rideID,
 	)
 	return err
+}
+
+func (s *service) DeleteAllRides(ctx context.Context) (int, error) {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sub_rides`); err != nil {
+		return 0, fmt.Errorf("deleting sub_rides: %w", err)
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM rides`)
+	if err != nil {
+		return 0, fmt.Errorf("deleting rides: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return int(n), nil
 }
 
 func (s *service) CancelExpiredRides(ctx context.Context) (int, error) {
