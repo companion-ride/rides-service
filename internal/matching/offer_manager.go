@@ -280,6 +280,7 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 			continue
 		}
 		if count >= cand.MaxPassengers {
+			slog.Info("skipping candidate: at capacity", "ride_id", cand.RideID, "driver_id", cand.DriverID, "count", count, "max", cand.MaxPassengers, "request_id", requestID)
 			continue
 		}
 
@@ -287,19 +288,24 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 		if locErr == nil {
 			dist := haversine(loc.Lat, loc.Lon, cand.PickupPointLat, cand.PickupPointLon)
 			if dist < mp.MinDriverDistanceM {
+				slog.Info("skipping candidate: driver too close to pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "distance_m", dist, "min_distance_m", mp.MinDriverDistanceM, "request_id", requestID)
 				continue
 			}
 
 			driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
 			if fracErr == nil {
 				if driverFrac >= cand.PickupFrac {
+					slog.Info("skipping candidate: driver already passed pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac, "request_id", requestID)
 					continue
 				}
 				etaSeconds := (cand.PickupFrac - driverFrac) * float64(cand.TotalDuration)
 				if etaSeconds < float64(mp.MinETASeconds) {
+					slog.Info("skipping candidate: ETA too short", "ride_id", cand.RideID, "driver_id", cand.DriverID, "eta_seconds", etaSeconds, "min_eta_seconds", mp.MinETASeconds, "request_id", requestID)
 					continue
 				}
 			}
+		} else {
+			slog.Info("candidate location unavailable, skipping location filters", "driver_id", cand.DriverID, "error", locErr)
 		}
 
 		// Send offer under lock
