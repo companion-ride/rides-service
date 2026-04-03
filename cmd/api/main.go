@@ -207,6 +207,25 @@ func main() {
 		slog.Info("kafka consumer started", "topic", matching.TopicRideRequests, "group", "rides-service")
 	}
 
+	// Background cleanup: cancel expired rides every 5 minutes
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-reloadCtx.Done():
+				return
+			case <-ticker.C:
+				n, err := db.CancelExpiredRides(context.Background())
+				if err != nil {
+					slog.Error("failed to cancel expired rides", "error", err)
+				} else if n > 0 {
+					slog.Info("cancelled expired rides", "count", n)
+				}
+			}
+		}
+	}()
+
 	srv := server.NewServer(cfg, db, mpLoader)
 
 	registerWithGateway(cfg.Port)

@@ -39,6 +39,7 @@ type Ride struct {
 	Status        string
 	StartedAt     *time.Time
 	CompletedAt   *time.Time
+	ExpiresAt     *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -192,6 +193,7 @@ type Service interface {
 	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
 	ListActiveRides(ctx context.Context) ([]Ride, error)
 
+	CancelExpiredRides(ctx context.Context) (int, error)
 	GetDriverRideHistory(ctx context.Context, driverID string, limit, offset int) ([]DriverRideHistoryRow, int, error)
 	GetPassengerRideHistory(ctx context.Context, passengerID string, limit, offset int) ([]PassengerRideHistoryRow, int, error)
 
@@ -291,8 +293,8 @@ func EnsureSchema(connStr, schema string) error {
 
 func (s *service) CreateRide(ctx context.Context, ride *Ride) error {
 	err := s.db.QueryRowContext(ctx,
-		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, max_passengers, status)
-		 VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7, $8, $9, $10)
+		`INSERT INTO rides (driver_id, route_id, geometry, start_lat, start_lon, finish_lat, finish_lon, total_duration, max_passengers, status, expires_at)
+		 VALUES ($1, $2, ST_GeomFromText($3, 4326), $4, $5, $6, $7, $8, $9, $10, now() + INTERVAL '3 hours')
 		 RETURNING ride_id`,
 		ride.DriverID, ride.RouteID, ride.GeometryWKT,
 		ride.StartLat, ride.StartLon, ride.FinishLat, ride.FinishLon,
@@ -309,12 +311,12 @@ func (s *service) GetRide(ctx context.Context, rideID string) (*Ride, error) {
 	err := s.db.QueryRowContext(ctx,
 		`SELECT ride_id, driver_id, route_id, ST_AsText(geometry),
 		        start_lat, start_lon, finish_lat, finish_lon,
-		        total_duration, max_passengers, status, started_at, completed_at, created_at, updated_at
+		        total_duration, max_passengers, status, started_at, completed_at, expires_at, created_at, updated_at
 		 FROM rides WHERE ride_id = $1`,
 		rideID,
 	).Scan(&ride.RideID, &ride.DriverID, &ride.RouteID, &ride.GeometryWKT,
 		&ride.StartLat, &ride.StartLon, &ride.FinishLat, &ride.FinishLon,
-		&ride.TotalDuration, &ride.MaxPassengers, &ride.Status, &ride.StartedAt, &ride.CompletedAt, &ride.CreatedAt, &ride.UpdatedAt)
+		&ride.TotalDuration, &ride.MaxPassengers, &ride.Status, &ride.StartedAt, &ride.CompletedAt, &ride.ExpiresAt, &ride.CreatedAt, &ride.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +379,7 @@ WITH candidates AS (
     SELECT r.ride_id, r.driver_id, r.route_id, r.geometry, r.total_duration, r.max_passengers, r.status
     FROM rides r
     WHERE r.status IN ('pending', 'active')
+      AND (r.expires_at IS NULL OR r.expires_at > now())
       AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $5)
       AND ST_DWithin(r.geometry::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $6)
 )
@@ -443,7 +446,7 @@ func (s *service) GetDriverFraction(ctx context.Context, rideID string, lon, lat
 func (s *service) ListActiveRides(ctx context.Context) ([]Ride, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT ride_id, driver_id, route_id, start_lat, start_lon, finish_lat, finish_lon, status
-		 FROM rides WHERE status IN ('pending', 'active') ORDER BY created_at DESC`)
+		 FROM rides WHERE status IN ('pending', 'active') AND (expires_at IS NULL OR expires_at > now()) ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -671,6 +674,24 @@ func (s *service) CancelActiveSubRides(ctx context.Context, rideID string) error
 		rideID,
 	)
 	return err
+}
+
+func (s *service) CancelExpiredRides(ctx context.Context) (int, error) {
+	// Cancel expired pending rides and their sub-rides in one go
+	result, err := s.db.ExecContext(ctx,
+		`WITH expired AS (
+			UPDATE rides SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+			WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= now()
+			RETURNING ride_id
+		)
+		UPDATE sub_rides SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+		WHERE ride_id IN (SELECT ride_id FROM expired) AND status IN ('pending', 'picked_up')`)
+	if err != nil {
+		return 0, fmt.Errorf("cancelling expired rides: %w", err)
+	}
+	// Count cancelled rides (approximate via rows affected)
+	n, _ := result.RowsAffected()
+	return int(n), nil
 }
 
 func (s *service) AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error) {
