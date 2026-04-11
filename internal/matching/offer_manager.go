@@ -109,10 +109,25 @@ func (om *OfferManager) HandleRideRequest(ctx context.Context, msg InboundMessag
 	}
 
 	if len(candidates) == 0 {
-		slog.Info("no matching rides found", "request_id", msg.RequestID, "passenger_id", msg.PassengerID)
+		slog.Info("no matching rides found",
+			"request_id", msg.RequestID,
+			"passenger_id", msg.PassengerID,
+			"pickup_lat", msg.Pickup.Latitude,
+			"pickup_lon", msg.Pickup.Longitude,
+			"dropoff_lat", msg.Dropoff.Latitude,
+			"dropoff_lon", msg.Dropoff.Longitude,
+			"pickup_radius_m", mp.PickupRadiusM,
+			"dropoff_radius_m", mp.DropoffRadiusM,
+		)
 		om.sendNoMatch(ctx, msg.RequestID, msg.PassengerID)
 		return
 	}
+
+	slog.Info("matching candidates found",
+		"request_id", msg.RequestID,
+		"passenger_id", msg.PassengerID,
+		"candidate_count", len(candidates),
+	)
 
 	req := &PendingRequest{
 		RequestID:   msg.RequestID,

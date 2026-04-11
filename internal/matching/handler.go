@@ -44,9 +44,17 @@ func (h *Handler) sendError(ctx context.Context, userID, rideID, message string)
 func (h *Handler) HandleMessage(ctx context.Context, value []byte) {
 	var msg InboundMessage
 	if err := json.Unmarshal(value, &msg); err != nil {
-		slog.Error("failed to unmarshal kafka message", "error", err)
+		slog.Error("failed to unmarshal kafka message", "error", err, "raw_len", len(value))
 		return
 	}
+
+	slog.Info("kafka message received",
+		"action", msg.Action,
+		"request_id", msg.RequestID,
+		"ride_id", msg.RideID,
+		"user_id", msg.UserID,
+		"passenger_id", msg.PassengerID,
+	)
 
 	switch msg.Action {
 	case ActionRequest:
