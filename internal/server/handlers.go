@@ -177,12 +177,21 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 		}
 
 		// Route-based check: has driver already passed the pickup?
-		loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
-		if locErr == nil {
-			driverFrac, fracErr := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
-			if fracErr == nil && driverFrac >= cand.PickupFrac {
-				slog.Info("driver already passed pickup, skipping", "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac)
-				continue
+		// Only runs for active rides — pending rides haven't started driving,
+		// so the driver's current GPS is meaningless for accept/reject here.
+		status, statusErr := s.db.GetRideStatus(c.Request.Context(), cand.RideID)
+		if statusErr != nil {
+			slog.Warn("failed to fetch ride status for position filter — proceeding with offer",
+				"ride_id", cand.RideID, "error", statusErr)
+		} else if status == database.StatusActive {
+			loc, locErr := s.location.GetCurrentLocation(c.Request.Context(), cand.DriverID)
+			if locErr == nil {
+				driverFrac, fracErr := s.db.GetDriverFraction(c.Request.Context(), cand.RideID, loc.Lon, loc.Lat)
+				if fracErr == nil && driverFrac >= cand.PickupFrac {
+					slog.Info("driver already passed pickup, skipping",
+						"driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac)
+					continue
+				}
 			}
 		}
 

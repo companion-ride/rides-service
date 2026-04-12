@@ -27,6 +27,16 @@ type LocationProvider interface {
 	GetCurrentLocation(ctx context.Context, userID string) (*location.Location, error)
 }
 
+// DB abstracts the subset of database.Service that OfferManager needs.
+// Kept narrow so tests can stub it without implementing the full Service.
+type DB interface {
+	FindMatchingRides(ctx context.Context, params database.MatchParams) ([]database.MatchResult, error)
+	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
+	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
+	CreateSubRideWithCapacityCheck(ctx context.Context, subRide *database.SubRide) error
+	GetRideStatus(ctx context.Context, rideID string) (string, error)
+}
+
 // PendingRequest tracks a passenger's ride search in memory.
 type PendingRequest struct {
 	RequestID    string
@@ -51,7 +61,7 @@ type OfferManager struct {
 	mu       sync.Mutex
 	pending  map[string]*PendingRequest // key: request_id
 	producer MessageSender
-	db       database.Service
+	db       DB
 	location LocationProvider
 	params   *config.MatchingParamsLoader
 }
@@ -59,7 +69,7 @@ type OfferManager struct {
 // NewOfferManager creates a new OfferManager.
 func NewOfferManager(
 	producer MessageSender,
-	db database.Service,
+	db DB,
 	loc LocationProvider,
 	params *config.MatchingParamsLoader,
 ) *OfferManager {
@@ -297,12 +307,21 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 			continue
 		}
 
-		loc, locErr := om.location.GetCurrentLocation(ctx, cand.DriverID)
-		if locErr == nil {
-			driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
-			if fracErr == nil && driverFrac >= cand.PickupFrac {
-				slog.Info("skipping candidate: driver already passed pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac, "request_id", requestID)
-				continue
+		status, statusErr := om.db.GetRideStatus(ctx, cand.RideID)
+		if statusErr != nil {
+			slog.Warn("failed to fetch ride status for position filter — proceeding with offer",
+				"ride_id", cand.RideID, "request_id", requestID, "error", statusErr)
+		} else if status == database.StatusActive {
+			loc, locErr := om.location.GetCurrentLocation(ctx, cand.DriverID)
+			if locErr == nil {
+				driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
+				if fracErr == nil && driverFrac >= cand.PickupFrac {
+					slog.Info("skipping candidate: driver already passed pickup",
+						"ride_id", cand.RideID, "driver_id", cand.DriverID,
+						"driver_frac", driverFrac, "pickup_frac", cand.PickupFrac,
+						"request_id", requestID)
+					continue
+				}
 			}
 		}
 
