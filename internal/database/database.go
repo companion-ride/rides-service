@@ -179,6 +179,7 @@ type Service interface {
 
 	CreateRide(ctx context.Context, ride *Ride) error
 	GetRide(ctx context.Context, rideID string) (*Ride, error)
+	GetRideStatus(ctx context.Context, rideID string) (string, error)
 	UpdateRideStatus(ctx context.Context, rideID, status string) error
 
 	CreateSubRide(ctx context.Context, subRide *SubRide) error
@@ -322,6 +323,18 @@ func (s *service) GetRide(ctx context.Context, rideID string) (*Ride, error) {
 		return nil, err
 	}
 	return &ride, nil
+}
+
+func (s *service) GetRideStatus(ctx context.Context, rideID string) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT status FROM rides WHERE ride_id = $1`,
+		rideID,
+	).Scan(&status)
+	if err != nil {
+		return "", err
+	}
+	return status, nil
 }
 
 func (s *service) UpdateRideStatus(ctx context.Context, rideID, status string) error {
