@@ -27,6 +27,16 @@ type LocationProvider interface {
 	GetCurrentLocation(ctx context.Context, userID string) (*location.Location, error)
 }
 
+// DB abstracts the subset of database.Service that OfferManager needs.
+// Kept narrow so tests can stub it without implementing the full Service.
+type DB interface {
+	FindMatchingRides(ctx context.Context, params database.MatchParams) ([]database.MatchResult, error)
+	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
+	GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error)
+	CreateSubRideWithCapacityCheck(ctx context.Context, subRide *database.SubRide) error
+	GetRideStatus(ctx context.Context, rideID string) (string, error)
+}
+
 // PendingRequest tracks a passenger's ride search in memory.
 type PendingRequest struct {
 	RequestID    string
@@ -51,7 +61,7 @@ type OfferManager struct {
 	mu       sync.Mutex
 	pending  map[string]*PendingRequest // key: request_id
 	producer MessageSender
-	db       database.Service
+	db       DB
 	location LocationProvider
 	params   *config.MatchingParamsLoader
 }
@@ -59,7 +69,7 @@ type OfferManager struct {
 // NewOfferManager creates a new OfferManager.
 func NewOfferManager(
 	producer MessageSender,
-	db database.Service,
+	db DB,
 	loc LocationProvider,
 	params *config.MatchingParamsLoader,
 ) *OfferManager {
