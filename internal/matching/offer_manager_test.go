@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,11 +53,11 @@ func (m *mockSender) messages() []sentMessage {
 
 type mockLocation struct {
 	locations map[string]*location.Location
-	calls     int
+	calls     atomic.Int32
 }
 
 func (m *mockLocation) GetCurrentLocation(_ context.Context, userID string) (*location.Location, error) {
-	m.calls++
+	m.calls.Add(1)
 	if loc, ok := m.locations[userID]; ok {
 		return loc, nil
 	}
@@ -73,8 +74,8 @@ type mockDB struct {
 	// Call counters for assertions. Incremented unconditionally at the top of
 	// each method (before the stub check) so tests can assert "this method was
 	// called at all" — not just "this method was called with the stub installed."
-	getRideStatusCalls     int
-	getDriverFractionCalls int
+	getRideStatusCalls     atomic.Int32
+	getDriverFractionCalls atomic.Int32
 }
 
 func (m *mockDB) FindMatchingRides(ctx context.Context, params database.MatchParams) ([]database.MatchResult, error) {
@@ -92,7 +93,7 @@ func (m *mockDB) CountActiveSubRides(ctx context.Context, rideID string) (int, e
 }
 
 func (m *mockDB) GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error) {
-	m.getDriverFractionCalls++
+	m.getDriverFractionCalls.Add(1)
 	if m.GetDriverFractionFunc != nil {
 		return m.GetDriverFractionFunc(ctx, rideID, lon, lat)
 	}
@@ -107,7 +108,7 @@ func (m *mockDB) CreateSubRideWithCapacityCheck(ctx context.Context, subRide *da
 }
 
 func (m *mockDB) GetRideStatus(ctx context.Context, rideID string) (string, error) {
-	m.getRideStatusCalls++
+	m.getRideStatusCalls.Add(1)
 	if m.GetRideStatusFunc != nil {
 		return m.GetRideStatusFunc(ctx, rideID)
 	}
@@ -255,14 +256,14 @@ func TestOfferManager_FilterGate_PendingBehindPickup(t *testing.T) {
 	if notif.Event != "ride_offer" {
 		t.Errorf("expected ride_offer, got %s", notif.Event)
 	}
-	if db.getRideStatusCalls != 1 {
-		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	if db.getRideStatusCalls.Load() !=1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls.Load())
 	}
-	if db.getDriverFractionCalls != 0 {
-		t.Errorf("expected 0 GetDriverFraction calls, got %d", db.getDriverFractionCalls)
+	if db.getDriverFractionCalls.Load() !=0 {
+		t.Errorf("expected 0 GetDriverFraction calls, got %d", db.getDriverFractionCalls.Load())
 	}
-	if loc.calls != 0 {
-		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	if loc.calls.Load() !=0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls.Load())
 	}
 }
 
@@ -296,14 +297,14 @@ func TestOfferManager_FilterGate_PendingPastPickup(t *testing.T) {
 	if !ok || notif.Event != "ride_offer" {
 		t.Fatalf("expected ride_offer, got %+v", msgs[0].value)
 	}
-	if db.getRideStatusCalls != 1 {
-		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	if db.getRideStatusCalls.Load() !=1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls.Load())
 	}
-	if db.getDriverFractionCalls != 0 {
-		t.Errorf("expected 0 GetDriverFraction calls (filter must short-circuit for pending), got %d", db.getDriverFractionCalls)
+	if db.getDriverFractionCalls.Load() !=0 {
+		t.Errorf("expected 0 GetDriverFraction calls (filter must short-circuit for pending), got %d", db.getDriverFractionCalls.Load())
 	}
-	if loc.calls != 0 {
-		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	if loc.calls.Load() !=0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls.Load())
 	}
 }
 
@@ -337,14 +338,14 @@ func TestOfferManager_FilterGate_ActiveBehindPickup(t *testing.T) {
 	if !ok || notif.Event != "ride_offer" {
 		t.Fatalf("expected ride_offer, got %+v", msgs[0].value)
 	}
-	if db.getRideStatusCalls != 1 {
-		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	if db.getRideStatusCalls.Load() !=1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls.Load())
 	}
-	if db.getDriverFractionCalls != 1 {
-		t.Errorf("expected 1 GetDriverFraction call, got %d", db.getDriverFractionCalls)
+	if db.getDriverFractionCalls.Load() !=1 {
+		t.Errorf("expected 1 GetDriverFraction call, got %d", db.getDriverFractionCalls.Load())
 	}
-	if loc.calls != 1 {
-		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls)
+	if loc.calls.Load() !=1 {
+		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls.Load())
 	}
 }
 
@@ -384,11 +385,11 @@ func TestOfferManager_FilterGate_ActivePastPickup(t *testing.T) {
 		t.Errorf("expected ride_no_match (filter dropped the only candidate), got %s", notif.Event)
 	}
 	// Two-assertion shape: distinguishes "filter dropped it" from "filter never reached."
-	if db.getRideStatusCalls != 1 {
-		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	if db.getRideStatusCalls.Load() !=1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls.Load())
 	}
-	if db.getDriverFractionCalls != 1 {
-		t.Errorf("expected 1 GetDriverFraction call (proves filter actually ran), got %d", db.getDriverFractionCalls)
+	if db.getDriverFractionCalls.Load() !=1 {
+		t.Errorf("expected 1 GetDriverFraction call (proves filter actually ran), got %d", db.getDriverFractionCalls.Load())
 	}
 }
 
@@ -418,14 +419,14 @@ func TestOfferManager_FilterGate_StatusErrorFailsOpen(t *testing.T) {
 	if !ok || notif.Event != "ride_offer" {
 		t.Fatalf("expected ride_offer (fail-open), got %+v", msgs[0].value)
 	}
-	if db.getRideStatusCalls != 1 {
-		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	if db.getRideStatusCalls.Load() !=1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls.Load())
 	}
-	if db.getDriverFractionCalls != 0 {
-		t.Errorf("expected 0 GetDriverFraction calls (error branch skips the position check), got %d", db.getDriverFractionCalls)
+	if db.getDriverFractionCalls.Load() !=0 {
+		t.Errorf("expected 0 GetDriverFraction calls (error branch skips the position check), got %d", db.getDriverFractionCalls.Load())
 	}
-	if loc.calls != 0 {
-		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	if loc.calls.Load() !=0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls.Load())
 	}
 }
 
