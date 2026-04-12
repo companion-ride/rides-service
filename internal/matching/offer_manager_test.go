@@ -179,6 +179,256 @@ func TestOfferManager_NoMatchEmptyCandidates(t *testing.T) {
 	}
 }
 
+// buildTestOM builds an OfferManager with the given mocks for filter-gate tests.
+// Each test registers a t.Cleanup hook that stops any lingering offer/overall
+// timers — the filter-gate tests are the first in this file that actually
+// create real timers via offerToNextDriver, so they need the cleanup to avoid
+// leaving background goroutines running past the test's lifetime.
+func buildTestOM(t *testing.T, db *mockDB, sender *mockSender, loc *mockLocation) *OfferManager {
+	om := NewOfferManager(sender, db, loc, defaultParams())
+	t.Cleanup(func() {
+		om.mu.Lock()
+		defer om.mu.Unlock()
+		ids := make([]string, 0, len(om.pending))
+		for id := range om.pending {
+			ids = append(ids, id)
+		}
+		for _, id := range ids {
+			om.cleanup(id)
+		}
+	})
+	return om
+}
+
+// testCandidate returns a MatchResult with reasonable defaults that can be
+// tweaked per test.
+func testCandidate(pickupFrac float64) database.MatchResult {
+	return database.MatchResult{
+		RideID:          "ride-1",
+		DriverID:        "drv-1",
+		RouteID:         "route-1",
+		TotalDuration:   600,
+		MaxPassengers:   3,
+		Status:          database.StatusPending, // snapshot value; filter should refetch
+		PickupFrac:      pickupFrac,
+		DropoffFrac:     pickupFrac + 0.2,
+		PickupPointLat:  43.24,
+		PickupPointLon:  76.94,
+		DropoffPointLat: 43.25,
+		DropoffPointLon: 76.93,
+	}
+}
+
+// testRideRequest returns a minimal InboundMessage for HandleRideRequest.
+func testRideRequest() InboundMessage {
+	return InboundMessage{
+		RequestID:   "req-1",
+		PassengerID: "pass-1",
+		Pickup:      &InboundCoord{Latitude: 43.238, Longitude: 76.945},
+		Dropoff:     &InboundCoord{Latitude: 43.255, Longitude: 76.930},
+	}
+}
+
+func TestOfferManager_FilterGate_PendingBehindPickup(t *testing.T) {
+	cand := testCandidate(0.5)
+	db := &mockDB{
+		FindMatchingRidesFunc: func(context.Context, database.MatchParams) ([]database.MatchResult, error) {
+			return []database.MatchResult{cand}, nil
+		},
+		CountActiveSubRidesFunc: func(context.Context, string) (int, error) { return 0, nil },
+		GetRideStatusFunc:       func(context.Context, string) (string, error) { return database.StatusPending, nil },
+	}
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{}}
+
+	om := buildTestOM(t, db, sender, loc)
+	om.HandleRideRequest(context.Background(), testRideRequest())
+
+	msgs := sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	notif, ok := msgs[0].value.(NotificationMessage)
+	if !ok {
+		t.Fatalf("expected NotificationMessage, got %T", msgs[0].value)
+	}
+	if notif.Event != "ride_offer" {
+		t.Errorf("expected ride_offer, got %s", notif.Event)
+	}
+	if db.getRideStatusCalls != 1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	}
+	if db.getDriverFractionCalls != 0 {
+		t.Errorf("expected 0 GetDriverFraction calls, got %d", db.getDriverFractionCalls)
+	}
+	if loc.calls != 0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	}
+}
+
+func TestOfferManager_FilterGate_PendingPastPickup(t *testing.T) {
+	// Core behavior change: pending rides skip the position filter entirely,
+	// so the driver being "past" the pickup along the route doesn't reject the offer.
+	cand := testCandidate(0.3)
+	db := &mockDB{
+		FindMatchingRidesFunc: func(context.Context, database.MatchParams) ([]database.MatchResult, error) {
+			return []database.MatchResult{cand}, nil
+		},
+		CountActiveSubRidesFunc: func(context.Context, string) (int, error) { return 0, nil },
+		GetRideStatusFunc:       func(context.Context, string) (string, error) { return database.StatusPending, nil },
+		// GetDriverFractionFunc intentionally unset — it must never be called.
+	}
+	sender := &mockSender{}
+	loc := &mockLocation{
+		locations: map[string]*location.Location{
+			"drv-1": {Lat: 43.24, Lon: 76.94},
+		},
+	}
+
+	om := buildTestOM(t, db, sender, loc)
+	om.HandleRideRequest(context.Background(), testRideRequest())
+
+	msgs := sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	notif, ok := msgs[0].value.(NotificationMessage)
+	if !ok || notif.Event != "ride_offer" {
+		t.Fatalf("expected ride_offer, got %+v", msgs[0].value)
+	}
+	if db.getRideStatusCalls != 1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	}
+	if db.getDriverFractionCalls != 0 {
+		t.Errorf("expected 0 GetDriverFraction calls (filter must short-circuit for pending), got %d", db.getDriverFractionCalls)
+	}
+	if loc.calls != 0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	}
+}
+
+func TestOfferManager_FilterGate_ActiveBehindPickup(t *testing.T) {
+	cand := testCandidate(0.5)
+	db := &mockDB{
+		FindMatchingRidesFunc: func(context.Context, database.MatchParams) ([]database.MatchResult, error) {
+			return []database.MatchResult{cand}, nil
+		},
+		CountActiveSubRidesFunc: func(context.Context, string) (int, error) { return 0, nil },
+		GetRideStatusFunc:       func(context.Context, string) (string, error) { return database.StatusActive, nil },
+		GetDriverFractionFunc: func(context.Context, string, float64, float64) (float64, error) {
+			return 0.2, nil // below PickupFrac (0.5) — filter doesn't fire
+		},
+	}
+	sender := &mockSender{}
+	loc := &mockLocation{
+		locations: map[string]*location.Location{
+			"drv-1": {Lat: 43.24, Lon: 76.94},
+		},
+	}
+
+	om := buildTestOM(t, db, sender, loc)
+	om.HandleRideRequest(context.Background(), testRideRequest())
+
+	msgs := sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	notif, ok := msgs[0].value.(NotificationMessage)
+	if !ok || notif.Event != "ride_offer" {
+		t.Fatalf("expected ride_offer, got %+v", msgs[0].value)
+	}
+	if db.getRideStatusCalls != 1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	}
+	if db.getDriverFractionCalls != 1 {
+		t.Errorf("expected 1 GetDriverFraction call, got %d", db.getDriverFractionCalls)
+	}
+	if loc.calls != 1 {
+		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls)
+	}
+}
+
+func TestOfferManager_FilterGate_ActivePastPickup(t *testing.T) {
+	// Filter fires: driver is past pickup on an active ride, candidate skipped,
+	// loop exhausts to exactly one candidate, sendNoMatch emits ride_no_match.
+	cand := testCandidate(0.3)
+	db := &mockDB{
+		FindMatchingRidesFunc: func(context.Context, database.MatchParams) ([]database.MatchResult, error) {
+			return []database.MatchResult{cand}, nil
+		},
+		CountActiveSubRidesFunc: func(context.Context, string) (int, error) { return 0, nil },
+		GetRideStatusFunc:       func(context.Context, string) (string, error) { return database.StatusActive, nil },
+		GetDriverFractionFunc: func(context.Context, string, float64, float64) (float64, error) {
+			return 0.8, nil // above PickupFrac (0.3) — filter fires
+		},
+	}
+	sender := &mockSender{}
+	loc := &mockLocation{
+		locations: map[string]*location.Location{
+			"drv-1": {Lat: 43.24, Lon: 76.94},
+		},
+	}
+
+	om := buildTestOM(t, db, sender, loc)
+	om.HandleRideRequest(context.Background(), testRideRequest())
+
+	msgs := sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	notif, ok := msgs[0].value.(NotificationMessage)
+	if !ok {
+		t.Fatalf("expected NotificationMessage, got %T", msgs[0].value)
+	}
+	if notif.Event != "ride_no_match" {
+		t.Errorf("expected ride_no_match (filter dropped the only candidate), got %s", notif.Event)
+	}
+	// Two-assertion shape: distinguishes "filter dropped it" from "filter never reached."
+	if db.getRideStatusCalls != 1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	}
+	if db.getDriverFractionCalls != 1 {
+		t.Errorf("expected 1 GetDriverFraction call (proves filter actually ran), got %d", db.getDriverFractionCalls)
+	}
+}
+
+func TestOfferManager_FilterGate_StatusErrorFailsOpen(t *testing.T) {
+	cand := testCandidate(0.3)
+	db := &mockDB{
+		FindMatchingRidesFunc: func(context.Context, database.MatchParams) ([]database.MatchResult, error) {
+			return []database.MatchResult{cand}, nil
+		},
+		CountActiveSubRidesFunc: func(context.Context, string) (int, error) { return 0, nil },
+		GetRideStatusFunc: func(context.Context, string) (string, error) {
+			return "", errors.New("boom")
+		},
+		// GetDriverFractionFunc intentionally unset — it must never be called.
+	}
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{}}
+
+	om := buildTestOM(t, db, sender, loc)
+	om.HandleRideRequest(context.Background(), testRideRequest())
+
+	msgs := sender.messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	notif, ok := msgs[0].value.(NotificationMessage)
+	if !ok || notif.Event != "ride_offer" {
+		t.Fatalf("expected ride_offer (fail-open), got %+v", msgs[0].value)
+	}
+	if db.getRideStatusCalls != 1 {
+		t.Errorf("expected 1 GetRideStatus call, got %d", db.getRideStatusCalls)
+	}
+	if db.getDriverFractionCalls != 0 {
+		t.Errorf("expected 0 GetDriverFraction calls (error branch skips the position check), got %d", db.getDriverFractionCalls)
+	}
+	if loc.calls != 0 {
+		t.Errorf("expected 0 GetCurrentLocation calls, got %d", loc.calls)
+	}
+}
+
 func TestHaversine(t *testing.T) {
 	d := haversine(43.238, 76.945, 43.250, 76.945)
 	if d < 1300 || d > 1400 {
