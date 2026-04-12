@@ -2,6 +2,7 @@ package matching
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -51,14 +52,70 @@ func (m *mockSender) messages() []sentMessage {
 
 type mockLocation struct {
 	locations map[string]*location.Location
+	calls     int
 }
 
 func (m *mockLocation) GetCurrentLocation(_ context.Context, userID string) (*location.Location, error) {
+	m.calls++
 	if loc, ok := m.locations[userID]; ok {
 		return loc, nil
 	}
 	return nil, context.DeadlineExceeded
 }
+
+type mockDB struct {
+	FindMatchingRidesFunc              func(ctx context.Context, params database.MatchParams) ([]database.MatchResult, error)
+	CountActiveSubRidesFunc            func(ctx context.Context, rideID string) (int, error)
+	GetDriverFractionFunc              func(ctx context.Context, rideID string, lon, lat float64) (float64, error)
+	CreateSubRideWithCapacityCheckFunc func(ctx context.Context, subRide *database.SubRide) error
+	GetRideStatusFunc                  func(ctx context.Context, rideID string) (string, error)
+
+	// Call counters for assertions. Incremented unconditionally at the top of
+	// each method (before the stub check) so tests can assert "this method was
+	// called at all" — not just "this method was called with the stub installed."
+	getRideStatusCalls     int
+	getDriverFractionCalls int
+}
+
+func (m *mockDB) FindMatchingRides(ctx context.Context, params database.MatchParams) ([]database.MatchResult, error) {
+	if m.FindMatchingRidesFunc != nil {
+		return m.FindMatchingRidesFunc(ctx, params)
+	}
+	return nil, errors.New("mockDB: FindMatchingRides not stubbed")
+}
+
+func (m *mockDB) CountActiveSubRides(ctx context.Context, rideID string) (int, error) {
+	if m.CountActiveSubRidesFunc != nil {
+		return m.CountActiveSubRidesFunc(ctx, rideID)
+	}
+	return 0, nil
+}
+
+func (m *mockDB) GetDriverFraction(ctx context.Context, rideID string, lon, lat float64) (float64, error) {
+	m.getDriverFractionCalls++
+	if m.GetDriverFractionFunc != nil {
+		return m.GetDriverFractionFunc(ctx, rideID, lon, lat)
+	}
+	return 0, errors.New("mockDB: GetDriverFraction not stubbed")
+}
+
+func (m *mockDB) CreateSubRideWithCapacityCheck(ctx context.Context, subRide *database.SubRide) error {
+	if m.CreateSubRideWithCapacityCheckFunc != nil {
+		return m.CreateSubRideWithCapacityCheckFunc(ctx, subRide)
+	}
+	return errors.New("mockDB: CreateSubRideWithCapacityCheck not stubbed")
+}
+
+func (m *mockDB) GetRideStatus(ctx context.Context, rideID string) (string, error) {
+	m.getRideStatusCalls++
+	if m.GetRideStatusFunc != nil {
+		return m.GetRideStatusFunc(ctx, rideID)
+	}
+	return "", errors.New("mockDB: GetRideStatus not stubbed")
+}
+
+// Compile-time assertion that mockDB satisfies the matching.DB interface.
+var _ DB = (*mockDB)(nil)
 
 func TestOfferManager_CleanupStopsTimers(t *testing.T) {
 	om := &OfferManager{
