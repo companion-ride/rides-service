@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -107,4 +109,77 @@ func TestClose(t *testing.T) {
 	if srv.Close() != nil {
 		t.Fatalf("expected Close() to return nil")
 	}
+}
+
+func TestGetRideStatus(t *testing.T) {
+	dbOnce = sync.Once{} // reset singleton
+	dbInstance = nil
+	srv := New(testConnStr)
+	ctx := context.Background()
+
+	t.Run("pending ride", func(t *testing.T) {
+		ride := &Ride{
+			DriverID:      "00000000-0000-0000-0000-000000000001",
+			RouteID:       "00000000-0000-0000-0000-000000000002",
+			GeometryWKT:   "LINESTRING(76.94 43.24, 76.95 43.25)",
+			StartLat:      43.24,
+			StartLon:      76.94,
+			FinishLat:     43.25,
+			FinishLon:     76.95,
+			TotalDuration: 600,
+			MaxPassengers: 3,
+			Status:        StatusPending,
+		}
+		if err := srv.CreateRide(ctx, ride); err != nil {
+			t.Fatalf("CreateRide: %v", err)
+		}
+
+		status, err := srv.GetRideStatus(ctx, ride.RideID)
+		if err != nil {
+			t.Fatalf("GetRideStatus: %v", err)
+		}
+		if status != StatusPending {
+			t.Errorf("expected %q, got %q", StatusPending, status)
+		}
+	})
+
+	t.Run("active ride", func(t *testing.T) {
+		ride := &Ride{
+			DriverID:      "00000000-0000-0000-0000-000000000003",
+			RouteID:       "00000000-0000-0000-0000-000000000004",
+			GeometryWKT:   "LINESTRING(76.94 43.24, 76.95 43.25)",
+			StartLat:      43.24,
+			StartLon:      76.94,
+			FinishLat:     43.25,
+			FinishLon:     76.95,
+			TotalDuration: 600,
+			MaxPassengers: 3,
+			Status:        StatusPending,
+		}
+		if err := srv.CreateRide(ctx, ride); err != nil {
+			t.Fatalf("CreateRide: %v", err)
+		}
+		if err := srv.UpdateRideStatus(ctx, ride.RideID, StatusActive); err != nil {
+			t.Fatalf("UpdateRideStatus: %v", err)
+		}
+
+		status, err := srv.GetRideStatus(ctx, ride.RideID)
+		if err != nil {
+			t.Fatalf("GetRideStatus: %v", err)
+		}
+		if status != StatusActive {
+			t.Errorf("expected %q, got %q", StatusActive, status)
+		}
+	})
+
+	t.Run("missing ride returns sql.ErrNoRows", func(t *testing.T) {
+		missing := "00000000-0000-0000-0000-0000000000ff"
+		_, err := srv.GetRideStatus(ctx, missing)
+		if err == nil {
+			t.Fatal("expected error for missing ride, got nil")
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("expected sql.ErrNoRows, got %v", err)
+		}
+	})
 }
