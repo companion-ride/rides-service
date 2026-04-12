@@ -59,6 +59,10 @@ func TestMain(m *testing.M) {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
 
+	if err := RunMigrations(testConnStr, "../../migrations"); err != nil {
+		log.Fatalf("could not run migrations: %v", err)
+	}
+
 	m.Run()
 
 	if teardown != nil && teardown(context.Background()) != nil {
