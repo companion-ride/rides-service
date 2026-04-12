@@ -307,12 +307,21 @@ func (om *OfferManager) offerToNextDriver(ctx context.Context, requestID string)
 			continue
 		}
 
-		loc, locErr := om.location.GetCurrentLocation(ctx, cand.DriverID)
-		if locErr == nil {
-			driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
-			if fracErr == nil && driverFrac >= cand.PickupFrac {
-				slog.Info("skipping candidate: driver already passed pickup", "ride_id", cand.RideID, "driver_id", cand.DriverID, "driver_frac", driverFrac, "pickup_frac", cand.PickupFrac, "request_id", requestID)
-				continue
+		status, statusErr := om.db.GetRideStatus(ctx, cand.RideID)
+		if statusErr != nil {
+			slog.Warn("failed to fetch ride status for position filter — proceeding with offer",
+				"ride_id", cand.RideID, "request_id", requestID, "error", statusErr)
+		} else if status == database.StatusActive {
+			loc, locErr := om.location.GetCurrentLocation(ctx, cand.DriverID)
+			if locErr == nil {
+				driverFrac, fracErr := om.db.GetDriverFraction(ctx, cand.RideID, loc.Lon, loc.Lat)
+				if fracErr == nil && driverFrac >= cand.PickupFrac {
+					slog.Info("skipping candidate: driver already passed pickup",
+						"ride_id", cand.RideID, "driver_id", cand.DriverID,
+						"driver_frac", driverFrac, "pickup_frac", cand.PickupFrac,
+						"request_id", requestID)
+					continue
+				}
 			}
 		}
 
