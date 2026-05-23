@@ -593,3 +593,86 @@ func TestHandleOfferResponse_Accept_EmitsPassengerLocation(t *testing.T) {
 		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls.Load())
 	}
 }
+
+func TestHandleOfferResponse_Accept_SkipsPassengerLocationOnLookupFailure(t *testing.T) {
+	sender := &mockSender{}
+	// Empty locations map → mockLocation returns context.DeadlineExceeded for any user_id.
+	loc := &mockLocation{locations: map[string]*location.Location{}}
+	db := acceptingDB()
+	om := buildTestOM(t, db, sender, loc)
+	primeAcceptedOffer(om)
+
+	accepted := true
+	om.HandleOfferResponse(context.Background(), InboundMessage{
+		Action:    ActionOfferResponse,
+		RequestID: "req-1",
+		UserID:    "drv-1",
+		Accepted:  &accepted,
+	})
+
+	// driver_assigned + driver_route must still ship.
+	assigns := []sentMessage{}
+	for _, m := range sender.messages() {
+		if m.topic == TopicDriverAssigned {
+			assigns = append(assigns, m)
+		}
+	}
+	if len(assigns) != 1 {
+		t.Errorf("expected 1 driver-assigned message, got %d", len(assigns))
+	}
+	if len(findMessagesOfType[DriverRouteMessage](sender)) != 1 {
+		t.Errorf("expected driver_route to still be emitted when location lookup fails")
+	}
+
+	// passenger_location must NOT ship.
+	if len(findMessagesOfType[PassengerLocationMessage](sender)) != 0 {
+		t.Errorf("expected 0 passenger_location messages when lookup fails, got %d",
+			len(findMessagesOfType[PassengerLocationMessage](sender)))
+	}
+
+	// Sanity: the lookup was attempted exactly once.
+	if loc.calls.Load() != 1 {
+		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls.Load())
+	}
+
+	// And the request was cleaned up (assignment completed successfully).
+	om.mu.Lock()
+	_, stillPending := om.pending["req-1"]
+	om.mu.Unlock()
+	if stillPending {
+		t.Errorf("request should be cleaned up after a successful assignment, even when passenger_location is skipped")
+	}
+}
+
+func TestHandleOfferResponse_Accept_SkipsDriverRouteOnEmptyRouteID(t *testing.T) {
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{
+		"pass-1": {Lat: 43.24, Lon: 76.94},
+	}}
+	db := acceptingDB()
+	om := buildTestOM(t, db, sender, loc)
+	primeAcceptedOffer(om)
+
+	// Simulate an impossible-in-practice NULL route_id by mutating the seeded
+	// CurrentOffer after primeAcceptedOffer. Reusing the helper keeps pickup/
+	// dropoff coords consistent with the other accept-path tests.
+	om.mu.Lock()
+	om.pending["req-1"].CurrentOffer.RouteID = ""
+	om.mu.Unlock()
+
+	accepted := true
+	om.HandleOfferResponse(context.Background(), InboundMessage{
+		Action:    ActionOfferResponse,
+		RequestID: "req-1",
+		UserID:    "drv-1",
+		Accepted:  &accepted,
+	})
+
+	if len(findMessagesOfType[DriverRouteMessage](sender)) != 0 {
+		t.Errorf("driver_route must be skipped when route_id is empty")
+	}
+	// passenger_location should still emit (independent of route_id).
+	if len(findMessagesOfType[PassengerLocationMessage](sender)) != 1 {
+		t.Errorf("passenger_location should still be emitted when route_id is empty")
+	}
+}
