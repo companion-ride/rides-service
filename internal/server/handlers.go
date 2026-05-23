@@ -27,10 +27,29 @@ func haversine(lat1, lon1, lat2, lon2 float64) float64 {
 	return R * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
+// ConfigHandler godoc
+//
+//	@Summary	Get public client config
+//	@Description	Returns the 2GIS map API key used by the mobile clients to render maps.
+//	@Tags		config
+//	@Produce	json
+//	@Success	200	{object}	map[string]string
+//	@Router		/config [get]
 func (s *Server) ConfigHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"map_api_key": s.cfg.DoubleGISAPIKey})
 }
 
+// ListRidesHandler godoc
+//
+//	@Summary	List all active rides
+//	@Description	Returns every ride with status pending or active. Used by passengers browsing available drivers.
+//	@Tags		rides
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{array}		object{ride_id=string,route_id=string,start_lat=number,start_lon=number,finish_lat=number,finish_lon=number}
+//	@Failure	401	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Router		/rides [get]
 func (s *Server) ListRidesHandler(c *gin.Context) {
 	rides, err := s.db.ListActiveRides(c.Request.Context())
 	if err != nil {
@@ -57,6 +76,18 @@ func (s *Server) ListRidesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, items)
 }
 
+// GetRouteHandler godoc
+//
+//	@Summary	Get a route by id
+//	@Description	Proxies to pathfinder; returns the driving route geometry and metadata.
+//	@Tags		routes
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Param		id	path		string	true	"Route UUID"
+//	@Success	200	{object}	map[string]any
+//	@Failure	401	{object}	map[string]string
+//	@Failure	502	{object}	map[string]string
+//	@Router		/route/{id} [get]
 func (s *Server) GetRouteHandler(c *gin.Context) {
 	routeID := c.Param("id")
 	route, err := s.pathfinder.GetRoute(c.Request.Context(), c.GetHeader("Authorization"), routeID)
@@ -67,6 +98,22 @@ func (s *Server) GetRouteHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, route)
 }
 
+// CreateDriverPathHandler godoc
+//
+//	@Summary	Create a driver path (ride)
+//	@Description	Calls pathfinder to build the driving route, persists it as a pending ride, and returns the ride id. The caller's JWT must match `driver_id`.
+//	@Tags		rides
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		CreateDriverPathRequest	true	"Driver id and start/finish coordinates"
+//	@Success	201		{object}	CreateDriverPathResponse
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Failure	502		{object}	map[string]string
+//	@Router		/ride/driver/path [post]
 func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 	var req CreateDriverPathRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -134,6 +181,22 @@ func (s *Server) CreateDriverPathHandler(c *gin.Context) {
 	})
 }
 
+// MatchPassengerHandler godoc
+//
+//	@Summary	Match a passenger to a driver (REST)
+//	@Description	Runs the PostGIS spatial search, filters by capacity and driver position, picks the best candidate, computes the walking path to the pickup point, and creates a pending sub-ride. Synchronous alternative to the Socket.IO offer flow.
+//	@Tags		matching
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		MatchPassengerRequest	true	"Passenger id and pickup/dropoff coordinates"
+//	@Success	201		{object}	MatchPassengerResponse
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	404		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Router		/ride/passenger/match [post]
 func (s *Server) MatchPassengerHandler(c *gin.Context) {
 	var req MatchPassengerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -289,6 +352,21 @@ func parseDuration(s string) int {
 	return 0
 }
 
+// SetDriverLocationHandler godoc
+//
+//	@Summary	Update driver location (REST)
+//	@Description	Writes the driver's current GPS coordinates to the location service. Caller's JWT must match `driver_id`. Prefer the Socket.IO `location_update` event for high-frequency updates.
+//	@Tags		location
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		SetDriverLocationRequest	true	"Driver id and coordinates"
+//	@Success	200		{object}	map[string]string
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	502		{object}	map[string]string
+//	@Router		/driver/location [post]
 func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 	var req SetDriverLocationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -310,6 +388,15 @@ func (s *Server) SetDriverLocationHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// SwaggerJSONHandler godoc
+//
+//	@Summary	Get the OpenAPI 2.0 spec for this service
+//	@Description	Returns the generated swagger.json. The `host` and `basePath` fields can be overridden at runtime via SWAGGER_HOST and SWAGGER_BASE_PATH env vars (useful when running behind the API gateway).
+//	@Tags		meta
+//	@Produce	json
+//	@Success	200	{object}	map[string]any
+//	@Failure	500	{object}	map[string]string
+//	@Router		/docs/swagger.json [get]
 func (s *Server) SwaggerJSONHandler(c *gin.Context) {
 	data, err := os.ReadFile("./docs/swagger.json")
 	if err != nil {
@@ -330,6 +417,19 @@ func (s *Server) SwaggerJSONHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, spec)
 }
 
+// RideHistoryHandler godoc
+//
+//	@Summary	Get the caller's ride history
+//	@Description	Returns paginated past rides for the authenticated user. Drivers see ride-level entries (with passenger count and total earnings); passengers see sub-ride-level entries (with the driver and price). The shape of `rides` depends on the caller's role.
+//	@Tags		rides
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Param		page	query		int	false	"Page number, 1-based"			default(1)	minimum(1)
+//	@Param		limit	query		int	false	"Page size (max 100)"			default(20)	minimum(1)	maximum(100)
+//	@Success	200		{object}	HistoryResponse
+//	@Failure	401		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Router		/rides/history [get]
 func (s *Server) RideHistoryHandler(c *gin.Context) {
 	userID := auth.GetUserID(c)
 	role := auth.GetRole(c)

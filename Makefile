@@ -44,6 +44,11 @@ clean:
 	@echo "Cleaning..."
 	@rm -f main
 
+# Generate swagger docs from code annotations
+swagger:
+	@echo "Generating swagger docs..."
+	@swag init --dir cmd/api,internal/server --output docs --outputTypes json --parseDependency --parseInternal
+
 # Live Reload
 watch:
 	@if command -v air > /dev/null; then \
@@ -74,4 +79,4 @@ migrate-down:
 		-database "postgres://$${DB_USERNAME}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT}/$${DB_DATABASE}?sslmode=disable&search_path=$${DB_SCHEMA}" \
 		down 1
 
-.PHONY: all build run test clean watch docker-run docker-down itest migrate-up migrate-down
+.PHONY: all build run test clean watch docker-run docker-down itest migrate-up migrate-down swagger

@@ -1,7 +1,7 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "Ride-matching service — creates driver rides and matches passengers to nearby routes.",
+        "description": "Ride management, matching, and lifecycle for drivers and passengers. Mounted at /api/rides by the gateway.",
         "title": "Rides API",
         "contact": {},
         "version": "1.0"
@@ -11,15 +11,718 @@
     "paths": {
         "/": {
             "get": {
-                "produces": ["application/json"],
-                "tags": ["system"],
-                "summary": "Hello World",
+                "description": "Returns a static hello payload. Useful as a smoke test that the service is reachable.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "Liveness ping",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {"type": "string"}
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/drivers/active": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Proxies to the location service's `/admin/drivers/active` endpoint and returns its response verbatim. Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List currently active drivers (proxy)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/matching/params": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the active in-memory matching parameters (pickup radius, dropoff radius, max passengers, min ETA, min driver distance). Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get current matching parameters",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.MatchingParamsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Persists new parameters to the admin_settings table and swaps the in-memory atomic pointer so the change takes effect immediately for new requests. Admin role required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Update matching parameters",
+                "parameters": [
+                    {
+                        "description": "New parameter values",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.MatchingParamsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/matching/stats": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns aggregated counts (total rides, by-status breakdown, total sub-rides) and derived ratios (match rate, average passengers per matched ride, cancellation rate, average wait seconds). Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get matching pipeline statistics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.MatchingStatsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/rides": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Paginated, filterable list of rides for the admin panel. Filters: status (pending/active/completed/cancelled) and search (free-text against driver id or addresses). Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "List rides (admin view)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number, 1-based",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size (max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "pending",
+                            "active",
+                            "completed",
+                            "cancelled"
+                        ],
+                        "type": "string",
+                        "description": "Filter by ride status",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Free-text search",
+                        "name": "search",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.AdminRideListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Wipes the rides table. Used during development and integration tests; admin role required when reached via /admin/rides. There is also a temporary unauthenticated alias at DELETE /admin/rides/all that must be removed before production.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Delete every ride (destructive)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/rides/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the ride and all of its sub-rides, including cancelled and completed ones. Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get a ride's full detail (admin view)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Ride UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.AdminRideDetailResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/settings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the free-form JSON document holding feature flags and tunables. Schema is admin-panel-defined and not enforced server-side. Admin role required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Get admin settings (raw JSON)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Stores a free-form JSON document. Body must be valid JSON, max 64 KB. Admin role required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "Upsert admin settings (raw JSON)",
+                "parameters": [
+                    {
+                        "description": "Arbitrary JSON",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/config": {
+            "get": {
+                "description": "Returns the 2GIS map API key used by the mobile clients to render maps.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "config"
+                ],
+                "summary": "Get public client config",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/docs/swagger.json": {
+            "get": {
+                "description": "Returns the generated swagger.json. The `host` and `basePath` fields can be overridden at runtime via SWAGGER_HOST and SWAGGER_BASE_PATH env vars (useful when running behind the API gateway).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "Get the OpenAPI 2.0 spec for this service",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/driver/location": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Writes the driver's current GPS coordinates to the location service. Caller's JWT must match `driver_id`. Prefer the Socket.IO `location_update` event for high-frequency updates.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "location"
+                ],
+                "summary": "Update driver location (REST)",
+                "parameters": [
+                    {
+                        "description": "Driver id and coordinates",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.SetDriverLocationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -27,47 +730,342 @@
         },
         "/health": {
             "get": {
-                "produces": ["application/json"],
-                "tags": ["system"],
-                "summary": "DB health check",
+                "description": "Returns database connection pool stats and a top-level status (up/down). Used by Docker healthchecks and the gateway's health filter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "meta"
+                ],
+                "summary": "Health check",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {}
-                        }
-                    }
-                }
-            }
-        },
-        "/api/config": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["system"],
-                "summary": "Frontend config",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "map_api_key": {"type": "string"}
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     }
                 }
             }
         },
-        "/api/route/{id}": {
+        "/ride/driver/path": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Calls pathfinder to build the driving route, persists it as a pending ride, and returns the ride id. The caller's JWT must match `driver_id`.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rides"
+                ],
+                "summary": "Create a driver path (ride)",
+                "parameters": [
+                    {
+                        "description": "Driver id and start/finish coordinates",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.CreateDriverPathRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/server.CreateDriverPathResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/ride/passenger/match": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Runs the PostGIS spatial search, filters by capacity and driver position, picks the best candidate, computes the walking path to the pickup point, and creates a pending sub-ride. Synchronous alternative to the Socket.IO offer flow.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "matching"
+                ],
+                "summary": "Match a passenger to a driver (REST)",
+                "parameters": [
+                    {
+                        "description": "Passenger id and pickup/dropoff coordinates",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.MatchPassengerRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/server.MatchPassengerResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/rides": {
             "get": {
-                "produces": ["application/json"],
-                "tags": ["routes"],
-                "summary": "Get route from pathfinder",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every ride with status pending or active. Used by passengers browsing available drivers.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rides"
+                ],
+                "summary": "List all active rides",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "finish_lat": {
+                                        "type": "number"
+                                    },
+                                    "finish_lon": {
+                                        "type": "number"
+                                    },
+                                    "ride_id": {
+                                        "type": "string"
+                                    },
+                                    "route_id": {
+                                        "type": "string"
+                                    },
+                                    "start_lat": {
+                                        "type": "number"
+                                    },
+                                    "start_lon": {
+                                        "type": "number"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/rides/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns paginated past rides for the authenticated user. Drivers see ride-level entries (with passenger count and total earnings); passengers see sub-ride-level entries (with the driver and price). The shape of `rides` depends on the caller's role.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "rides"
+                ],
+                "summary": "Get the caller's ride history",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number, 1-based",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Page size (max 100)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.HistoryResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/route/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Proxies to pathfinder; returns the driving route geometry and metadata.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "routes"
+                ],
+                "summary": "Get a route by id",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Route ID",
+                        "description": "Route UUID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -78,471 +1076,455 @@
                         "description": "OK",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {}
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
-                            "properties": {
-                                "error": {"type": "string"}
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
-                    }
-                }
-            }
-        },
-        "/api/rides": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["rides"],
-                "summary": "List active rides",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "ride_id":    {"type": "string"},
-                                    "route_id":   {"type": "string"},
-                                    "start_lat":  {"type": "number"},
-                                    "start_lon":  {"type": "number"},
-                                    "finish_lat": {"type": "number"},
-                                    "finish_lon": {"type": "number"}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/ride/driver/path": {
-            "post": {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["rides"],
-                "summary": "Create driver ride",
-                "parameters": [
-                    {
-                        "in": "body",
-                        "name": "body",
-                        "required": true,
-                        "schema": {"$ref": "#/definitions/CreateDriverPathRequest"}
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {"$ref": "#/definitions/CreateDriverPathResponse"}
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/ride/passenger/match": {
-            "post": {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["rides"],
-                "summary": "Match passenger to ride",
-                "parameters": [
-                    {
-                        "in": "body",
-                        "name": "body",
-                        "required": true,
-                        "schema": {"$ref": "#/definitions/MatchPassengerRequest"}
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {"$ref": "#/definitions/MatchPassengerResponse"}
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/driver/location": {
-            "post": {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["rides"],
-                "summary": "Set driver location",
-                "parameters": [
-                    {
-                        "in": "body",
-                        "name": "body",
-                        "required": true,
-                        "schema": {"$ref": "#/definitions/SetDriverLocationRequest"}
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/rides": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "List rides (paginated)",
-                "parameters": [
-                    {"type": "integer", "name": "page", "in": "query", "description": "Page number (default 1)"},
-                    {"type": "integer", "name": "limit", "in": "query", "description": "Items per page (default 20, max 100)"},
-                    {"type": "string", "name": "status", "in": "query", "description": "Filter by ride status"},
-                    {"type": "string", "name": "search", "in": "query", "description": "Search by driver/ride ID"}
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"$ref": "#/definitions/AdminRideListResponse"}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/rides/{id}": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Get ride detail with sub-rides",
-                "parameters": [
-                    {"type": "string", "name": "id", "in": "path", "required": true, "description": "Ride ID"}
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"$ref": "#/definitions/AdminRideDetailResponse"}
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/matching/stats": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Matching statistics",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"$ref": "#/definitions/MatchingStatsResponse"}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/matching/params": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Get matching parameters",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"$ref": "#/definitions/MatchingParamsResponse"}
-                    }
-                }
-            },
-            "put": {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Update matching parameters",
-                "parameters": [
-                    {
-                        "in": "body",
-                        "name": "body",
-                        "required": true,
-                        "schema": {"$ref": "#/definitions/MatchingParamsRequest"}
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/settings": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Get admin settings",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"type": "object", "additionalProperties": {}}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            },
-            "put": {
-                "consumes": ["application/json"],
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Update admin settings",
-                "parameters": [
-                    {
-                        "in": "body",
-                        "name": "body",
-                        "required": true,
-                        "schema": {"type": "object", "additionalProperties": {}}
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"type": "object", "properties": {"status": {"type": "string"}}}
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
-                    }
-                }
-            }
-        },
-        "/admin/drivers/active": {
-            "get": {
-                "produces": ["application/json"],
-                "tags": ["admin"],
-                "summary": "Active drivers (proxied from location-service)",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {"type": "array", "items": {"type": "object", "additionalProperties": {}}}
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {"type": "object", "properties": {"error": {"type": "string"}}}
                     }
                 }
             }
         }
     },
     "definitions": {
-        "Coord": {
+        "server.AdminRideDetailResponse": {
             "type": "object",
-            "required": ["lat", "lon"],
             "properties": {
-                "lat": {"type": "number"},
-                "lon": {"type": "number"}
+                "cancelledAt": {
+                    "type": "string"
+                },
+                "completedAt": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "distanceM": {
+                    "type": "integer"
+                },
+                "driverId": {
+                    "type": "string"
+                },
+                "finishLat": {
+                    "type": "number"
+                },
+                "finishLon": {
+                    "type": "number"
+                },
+                "fromAddress": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "paymentMethod": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
+                },
+                "routeId": {
+                    "type": "string"
+                },
+                "startLat": {
+                    "type": "number"
+                },
+                "startLon": {
+                    "type": "number"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subRides": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.AdminSubRideItem"
+                    }
+                },
+                "toAddress": {
+                    "type": "string"
+                },
+                "totalDuration": {
+                    "type": "integer"
+                }
             }
         },
-        "CreateDriverPathRequest": {
+        "server.AdminRideListItem": {
             "type": "object",
-            "required": ["driver_id", "start", "finish"],
             "properties": {
-                "driver_id": {"type": "string", "format": "uuid"},
-                "start":     {"$ref": "#/definitions/Coord"},
-                "finish":    {"$ref": "#/definitions/Coord"}
+                "createdAt": {
+                    "type": "string"
+                },
+                "distanceM": {
+                    "type": "integer"
+                },
+                "driverId": {
+                    "type": "string"
+                },
+                "fromAddress": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "passengers": {
+                    "type": "integer"
+                },
+                "paymentMethod": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "toAddress": {
+                    "type": "string"
+                },
+                "totalDuration": {
+                    "type": "integer"
+                }
             }
         },
-        "CreateDriverPathResponse": {
+        "server.AdminRideListResponse": {
             "type": "object",
             "properties": {
-                "ride_id":  {"type": "string"},
-                "route_id": {"type": "string"},
-                "status":   {"type": "string"}
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "rides": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.AdminRideListItem"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
             }
         },
-        "MatchPassengerRequest": {
+        "server.AdminSubRideItem": {
             "type": "object",
-            "required": ["passenger_id", "pickup", "dropoff"],
             "properties": {
-                "passenger_id": {"type": "string", "format": "uuid"},
-                "pickup":       {"$ref": "#/definitions/Coord"},
-                "dropoff":      {"$ref": "#/definitions/Coord"}
+                "cancelledAt": {
+                    "type": "string"
+                },
+                "completedAt": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "dropoffLat": {
+                    "type": "number"
+                },
+                "dropoffLon": {
+                    "type": "number"
+                },
+                "passengerId": {
+                    "type": "string"
+                },
+                "pickupLat": {
+                    "type": "number"
+                },
+                "pickupLon": {
+                    "type": "number"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subRideId": {
+                    "type": "string"
+                }
             }
         },
-        "WalkPath": {
+        "server.Coord": {
             "type": "object",
+            "required": [
+                "lat",
+                "lon"
+            ],
             "properties": {
-                "geometry":      {"type": "array", "items": {"$ref": "#/definitions/Coord"}},
-                "walk_distance": {"type": "string"},
-                "walk_duration": {"type": "string"}
+                "lat": {
+                    "type": "number",
+                    "maximum": 90,
+                    "minimum": -90
+                },
+                "lon": {
+                    "type": "number",
+                    "maximum": 180,
+                    "minimum": -180
+                }
             }
         },
-        "MatchPassengerResponse": {
+        "server.CreateDriverPathRequest": {
             "type": "object",
+            "required": [
+                "driver_id",
+                "finish",
+                "start"
+            ],
             "properties": {
-                "sub_ride_id":    {"type": "string"},
-                "ride_id":        {"type": "string"},
-                "driver_id":      {"type": "string"},
-                "pickup_point":   {"$ref": "#/definitions/Coord"},
-                "dropoff_point":  {"$ref": "#/definitions/Coord"},
-                "pickup_walk_m":  {"type": "number"},
-                "dropoff_walk_m": {"type": "number"},
-                "total_walk_m":   {"type": "number"},
-                "walk_to_pickup": {"$ref": "#/definitions/WalkPath"}
+                "driver_id": {
+                    "type": "string"
+                },
+                "finish": {
+                    "$ref": "#/definitions/server.Coord"
+                },
+                "max_passengers": {
+                    "type": "integer"
+                },
+                "start": {
+                    "$ref": "#/definitions/server.Coord"
+                }
             }
         },
-        "SetDriverLocationRequest": {
+        "server.CreateDriverPathResponse": {
             "type": "object",
-            "required": ["driver_id", "lat", "lon"],
             "properties": {
-                "driver_id": {"type": "string", "format": "uuid"},
-                "lat": {"type": "number", "minimum": -90, "maximum": 90},
-                "lon": {"type": "number", "minimum": -180, "maximum": 180}
+                "ride_id": {
+                    "type": "string"
+                },
+                "route_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
             }
         },
-        "AdminRideListItem": {
+        "server.HistoryResponse": {
             "type": "object",
             "properties": {
-                "id":            {"type": "string"},
-                "driverId":      {"type": "string"},
-                "fromAddress":   {"type": "string"},
-                "toAddress":     {"type": "string"},
-                "status":        {"type": "string"},
-                "price":         {"type": "integer"},
-                "distanceM":     {"type": "integer"},
-                "totalDuration": {"type": "integer"},
-                "paymentMethod": {"type": "string"},
-                "passengers":    {"type": "integer"},
-                "createdAt":     {"type": "string", "format": "date-time"}
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "rides": {},
+                "total": {
+                    "type": "integer"
+                }
             }
         },
-        "AdminRideListResponse": {
+        "server.MatchPassengerRequest": {
             "type": "object",
+            "required": [
+                "dropoff",
+                "passenger_id",
+                "pickup"
+            ],
             "properties": {
-                "rides": {"type": "array", "items": {"$ref": "#/definitions/AdminRideListItem"}},
-                "total": {"type": "integer"},
-                "page":  {"type": "integer"},
-                "limit": {"type": "integer"}
+                "dropoff": {
+                    "$ref": "#/definitions/server.Coord"
+                },
+                "passenger_id": {
+                    "type": "string"
+                },
+                "pickup": {
+                    "$ref": "#/definitions/server.Coord"
+                }
             }
         },
-        "AdminSubRideItem": {
+        "server.MatchPassengerResponse": {
             "type": "object",
             "properties": {
-                "subRideId":   {"type": "string"},
-                "passengerId": {"type": "string"},
-                "pickupLat":   {"type": "number"},
-                "pickupLon":   {"type": "number"},
-                "dropoffLat":  {"type": "number"},
-                "dropoffLon":  {"type": "number"},
-                "status":      {"type": "string"},
-                "completedAt": {"type": "string", "format": "date-time"},
-                "cancelledAt": {"type": "string", "format": "date-time"},
-                "createdAt":   {"type": "string", "format": "date-time"}
+                "driver_id": {
+                    "type": "string"
+                },
+                "dropoff_point": {
+                    "$ref": "#/definitions/server.Coord"
+                },
+                "dropoff_walk_m": {
+                    "type": "number"
+                },
+                "pickup_point": {
+                    "$ref": "#/definitions/server.Coord"
+                },
+                "pickup_walk_m": {
+                    "type": "number"
+                },
+                "ride_id": {
+                    "type": "string"
+                },
+                "sub_ride_id": {
+                    "type": "string"
+                },
+                "total_walk_m": {
+                    "type": "number"
+                },
+                "walk_to_pickup": {
+                    "$ref": "#/definitions/server.WalkPath"
+                }
             }
         },
-        "AdminRideDetailResponse": {
+        "server.MatchingParamsRequest": {
             "type": "object",
+            "required": [
+                "dropoffRadiusM",
+                "maxPassengers",
+                "minDriverDistanceM",
+                "minEtaSeconds",
+                "pickupRadiusM"
+            ],
             "properties": {
-                "id":            {"type": "string"},
-                "driverId":      {"type": "string"},
-                "routeId":       {"type": "string"},
-                "fromAddress":   {"type": "string"},
-                "toAddress":     {"type": "string"},
-                "status":        {"type": "string"},
-                "price":         {"type": "integer"},
-                "distanceM":     {"type": "integer"},
-                "totalDuration": {"type": "integer"},
-                "paymentMethod": {"type": "string"},
-                "startLat":      {"type": "number"},
-                "startLon":      {"type": "number"},
-                "finishLat":     {"type": "number"},
-                "finishLon":     {"type": "number"},
-                "startedAt":     {"type": "string", "format": "date-time"},
-                "completedAt":   {"type": "string", "format": "date-time"},
-                "cancelledAt":   {"type": "string", "format": "date-time"},
-                "createdAt":     {"type": "string", "format": "date-time"},
-                "subRides":      {"type": "array", "items": {"$ref": "#/definitions/AdminSubRideItem"}}
+                "dropoffRadiusM": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 100
+                },
+                "maxPassengers": {
+                    "type": "integer",
+                    "maximum": 10,
+                    "minimum": 1
+                },
+                "minDriverDistanceM": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 100
+                },
+                "minEtaSeconds": {
+                    "type": "integer",
+                    "maximum": 600,
+                    "minimum": 30
+                },
+                "pickupRadiusM": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 100
+                }
             }
         },
-        "MatchingStatsResponse": {
+        "server.MatchingParamsResponse": {
             "type": "object",
             "properties": {
-                "totalRides":           {"type": "integer"},
-                "ridesByStatus":        {"type": "object", "additionalProperties": {"type": "integer"}},
-                "matchRate":            {"type": "number"},
-                "avgWaitSeconds":       {"type": "number"},
-                "totalSubRides":        {"type": "integer"},
-                "avgPassengersPerRide": {"type": "number"},
-                "cancellationRate":     {"type": "number"}
+                "dropoffRadiusM": {
+                    "type": "number"
+                },
+                "maxPassengers": {
+                    "type": "integer"
+                },
+                "minDriverDistanceM": {
+                    "type": "number"
+                },
+                "minEtaSeconds": {
+                    "type": "integer"
+                },
+                "pickupRadiusM": {
+                    "type": "number"
+                }
             }
         },
-        "MatchingParamsRequest": {
+        "server.MatchingStatsResponse": {
             "type": "object",
-            "required": ["pickupRadiusM", "dropoffRadiusM", "maxPassengers", "minEtaSeconds", "minDriverDistanceM"],
             "properties": {
-                "pickupRadiusM":      {"type": "integer", "minimum": 100, "maximum": 10000},
-                "dropoffRadiusM":     {"type": "integer", "minimum": 100, "maximum": 10000},
-                "maxPassengers":      {"type": "integer", "minimum": 1, "maximum": 10},
-                "minEtaSeconds":      {"type": "integer", "minimum": 30, "maximum": 600},
-                "minDriverDistanceM": {"type": "integer", "minimum": 100, "maximum": 10000}
+                "avgPassengersPerRide": {
+                    "type": "number"
+                },
+                "avgWaitSeconds": {
+                    "type": "number"
+                },
+                "cancellationRate": {
+                    "type": "number"
+                },
+                "matchRate": {
+                    "type": "number"
+                },
+                "ridesByStatus": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "totalRides": {
+                    "type": "integer"
+                },
+                "totalSubRides": {
+                    "type": "integer"
+                }
             }
         },
-        "MatchingParamsResponse": {
+        "server.SetDriverLocationRequest": {
+            "type": "object",
+            "required": [
+                "driver_id",
+                "lat",
+                "lon"
+            ],
+            "properties": {
+                "driver_id": {
+                    "type": "string"
+                },
+                "lat": {
+                    "type": "number",
+                    "maximum": 90,
+                    "minimum": -90
+                },
+                "lon": {
+                    "type": "number",
+                    "maximum": 180,
+                    "minimum": -180
+                }
+            }
+        },
+        "server.WalkCoord": {
             "type": "object",
             "properties": {
-                "pickupRadiusM":      {"type": "number"},
-                "dropoffRadiusM":     {"type": "number"},
-                "maxPassengers":      {"type": "integer"},
-                "minEtaSeconds":      {"type": "integer"},
-                "minDriverDistanceM": {"type": "number"}
+                "lat": {
+                    "type": "number"
+                },
+                "lon": {
+                    "type": "number"
+                }
             }
+        },
+        "server.WalkPath": {
+            "type": "object",
+            "properties": {
+                "geometry": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/server.WalkCoord"
+                    }
+                },
+                "walk_distance": {
+                    "type": "string"
+                },
+                "walk_duration": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "JWT issued by auth-service. Prefix with \"Bearer \".",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }

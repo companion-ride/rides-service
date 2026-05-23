@@ -1,3 +1,15 @@
+// Rides API
+//
+//	@title			Rides API
+//	@version		1.0
+//	@description	Ride management, matching, and lifecycle for drivers and passengers. Mounted at /api/rides by the gateway.
+//	@host			localhost:8081
+//	@BasePath		/
+//	@securityDefinitions.apikey	BearerAuth
+//	@in							header
+//	@name						Authorization
+//	@description				JWT issued by auth-service. Prefix with "Bearer ".
+
 package main
 
 import (

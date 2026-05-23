@@ -66,10 +66,26 @@ func (s *Server) RegisterRoutes() http.Handler {
 	return r
 }
 
+// HelloWorldHandler godoc
+//
+//	@Summary	Liveness ping
+//	@Description	Returns a static hello payload. Useful as a smoke test that the service is reachable.
+//	@Tags		meta
+//	@Produce	json
+//	@Success	200	{object}	map[string]string
+//	@Router		/ [get]
 func (s *Server) HelloWorldHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Hello World"})
 }
 
+// healthHandler godoc
+//
+//	@Summary	Health check
+//	@Description	Returns database connection pool stats and a top-level status (up/down). Used by Docker healthchecks and the gateway's health filter.
+//	@Tags		meta
+//	@Produce	json
+//	@Success	200	{object}	map[string]string
+//	@Router		/health [get]
 func (s *Server) healthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, s.db.Health())
 }

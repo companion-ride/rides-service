@@ -15,6 +15,18 @@ import (
 	"rides/internal/database"
 )
 
+// AdminGetSettingsHandler godoc
+//
+//	@Summary	Get admin settings (raw JSON)
+//	@Description	Returns the free-form JSON document holding feature flags and tunables. Schema is admin-panel-defined and not enforced server-side. Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{object}	map[string]any
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Router		/admin/settings [get]
 func (s *Server) AdminGetSettingsHandler(c *gin.Context) {
 	settings, err := s.db.GetAdminSettings(c.Request.Context())
 	if err != nil {
@@ -25,6 +37,21 @@ func (s *Server) AdminGetSettingsHandler(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", settings)
 }
 
+// AdminUpdateSettingsHandler godoc
+//
+//	@Summary	Upsert admin settings (raw JSON)
+//	@Description	Stores a free-form JSON document. Body must be valid JSON, max 64 KB. Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		object	true	"Arbitrary JSON"
+//	@Success	200		{object}	map[string]string
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Router		/admin/settings [put]
 func (s *Server) AdminUpdateSettingsHandler(c *gin.Context) {
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 64*1024)) // 64KB max
 	if err != nil {
@@ -43,6 +70,17 @@ func (s *Server) AdminUpdateSettingsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// AdminGetMatchingParamsHandler godoc
+//
+//	@Summary	Get current matching parameters
+//	@Description	Returns the active in-memory matching parameters (pickup radius, dropoff radius, max passengers, min ETA, min driver distance). Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{object}	MatchingParamsResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Router		/admin/matching/params [get]
 func (s *Server) AdminGetMatchingParamsHandler(c *gin.Context) {
 	p := s.matchingParams.Get()
 	c.JSON(http.StatusOK, MatchingParamsResponse{
@@ -54,6 +92,21 @@ func (s *Server) AdminGetMatchingParamsHandler(c *gin.Context) {
 	})
 }
 
+// AdminUpdateMatchingParamsHandler godoc
+//
+//	@Summary	Update matching parameters
+//	@Description	Persists new parameters to the admin_settings table and swaps the in-memory atomic pointer so the change takes effect immediately for new requests. Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		MatchingParamsRequest	true	"New parameter values"
+//	@Success	200		{object}	map[string]string
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Router		/admin/matching/params [put]
 func (s *Server) AdminUpdateMatchingParamsHandler(c *gin.Context) {
 	var req MatchingParamsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -84,6 +137,22 @@ func (s *Server) AdminUpdateMatchingParamsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// AdminListRidesHandler godoc
+//
+//	@Summary	List rides (admin view)
+//	@Description	Paginated, filterable list of rides for the admin panel. Filters: status (pending/active/completed/cancelled) and search (free-text against driver id or addresses). Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Param		page	query		int		false	"Page number, 1-based"			default(1)	minimum(1)
+//	@Param		limit	query		int		false	"Page size (max 100)"			default(20)	minimum(1)	maximum(100)
+//	@Param		status	query		string	false	"Filter by ride status"			Enums(pending, active, completed, cancelled)
+//	@Param		search	query		string	false	"Free-text search"
+//	@Success	200		{object}	AdminRideListResponse
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Router		/admin/rides [get]
 func (s *Server) AdminListRidesHandler(c *gin.Context) {
 	page := queryIntOrDefault(c, "page", 1)
 	limit := queryIntOrDefault(c, "limit", 20)
@@ -132,6 +201,20 @@ func (s *Server) AdminListRidesHandler(c *gin.Context) {
 	})
 }
 
+// AdminGetRideHandler godoc
+//
+//	@Summary	Get a ride's full detail (admin view)
+//	@Description	Returns the ride and all of its sub-rides, including cancelled and completed ones. Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Param		id	path		string	true	"Ride UUID"
+//	@Success	200	{object}	AdminRideDetailResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	404	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Router		/admin/rides/{id} [get]
 func (s *Server) AdminGetRideHandler(c *gin.Context) {
 	rideID := c.Param("id")
 	ride, subs, err := s.db.GetAdminRideDetail(c.Request.Context(), rideID)
@@ -184,6 +267,18 @@ func (s *Server) AdminGetRideHandler(c *gin.Context) {
 	})
 }
 
+// AdminMatchingStatsHandler godoc
+//
+//	@Summary	Get matching pipeline statistics
+//	@Description	Returns aggregated counts (total rides, by-status breakdown, total sub-rides) and derived ratios (match rate, average passengers per matched ride, cancellation rate, average wait seconds). Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{object}	MatchingStatsResponse
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Router		/admin/matching/stats [get]
 func (s *Server) AdminMatchingStatsHandler(c *gin.Context) {
 	stats, err := s.db.GetMatchingStats(c.Request.Context())
 	if err != nil {
@@ -212,6 +307,18 @@ func (s *Server) AdminMatchingStatsHandler(c *gin.Context) {
 	})
 }
 
+// AdminActiveDriversHandler godoc
+//
+//	@Summary	List currently active drivers (proxy)
+//	@Description	Proxies to the location service's `/admin/drivers/active` endpoint and returns its response verbatim. Admin role required.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{object}	map[string]any
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	502	{object}	map[string]string
+//	@Router		/admin/drivers/active [get]
 func (s *Server) AdminActiveDriversHandler(c *gin.Context) {
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet,
 		s.cfg.LocationServiceURL+"/admin/drivers/active", nil)
@@ -251,6 +358,18 @@ func queryIntOrDefault(c *gin.Context, key string, def int) int {
 	return n
 }
 
+// AdminDeleteAllRidesHandler godoc
+//
+//	@Summary	Delete every ride (destructive)
+//	@Description	Wipes the rides table. Used during development and integration tests; admin role required when reached via /admin/rides. There is also a temporary unauthenticated alias at DELETE /admin/rides/all that must be removed before production.
+//	@Tags		admin
+//	@Security	BearerAuth
+//	@Produce	json
+//	@Success	200	{object}	map[string]string
+//	@Failure	401	{object}	map[string]string
+//	@Failure	403	{object}	map[string]string
+//	@Failure	500	{object}	map[string]string
+//	@Router		/admin/rides [delete]
 func (s *Server) AdminDeleteAllRidesHandler(c *gin.Context) {
 	ctx := c.Request.Context()
 	if _, err := s.db.DeleteAllRides(ctx); err != nil {
