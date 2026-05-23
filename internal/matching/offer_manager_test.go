@@ -436,3 +436,100 @@ func TestHaversine(t *testing.T) {
 		t.Errorf("expected ~1334m, got %.0fm", d)
 	}
 }
+
+// findMessagesOfType returns all sent messages on TopicRideNotifications whose
+// value has the concrete type T. Callers assert the Event field themselves on
+// the returned slice — this helper filters by topic and Go type only.
+func findMessagesOfType[T any](sender *mockSender) []T {
+	out := []T{}
+	for _, m := range sender.messages() {
+		if m.topic != TopicRideNotifications {
+			continue
+		}
+		if v, ok := m.value.(T); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// acceptingDB returns a mockDB that stubs CreateSubRideWithCapacityCheck to
+// succeed, assigning a fixed SubRideID — mirrors the Postgres RETURNING path.
+func acceptingDB() *mockDB {
+	return &mockDB{
+		CreateSubRideWithCapacityCheckFunc: func(_ context.Context, sr *database.SubRide) error {
+			sr.SubRideID = "sub-1"
+			return nil
+		},
+	}
+}
+
+// primeAcceptedOffer seeds the OfferManager with a pending request whose
+// CurrentOffer matches a known driver/ride, simulating the state right before
+// HandleOfferResponse processes a driver accept.
+func primeAcceptedOffer(om *OfferManager) {
+	cand := testCandidate(0.3)
+	om.mu.Lock()
+	om.pending["req-1"] = &PendingRequest{
+		RequestID:    "req-1",
+		PassengerID:  "pass-1",
+		PickupLat:    43.238,
+		PickupLon:    76.945,
+		DropoffLat:   43.255,
+		DropoffLon:   76.930,
+		CurrentOffer: &cand,
+	}
+	om.mu.Unlock()
+}
+
+func TestHandleOfferResponse_Accept_EmitsDriverRoute(t *testing.T) {
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{
+		"pass-1": {Lat: 43.238, Lon: 76.945},
+	}}
+	db := acceptingDB()
+	om := buildTestOM(t, db, sender, loc)
+	primeAcceptedOffer(om)
+
+	accepted := true
+	om.HandleOfferResponse(context.Background(), InboundMessage{
+		Action:    ActionOfferResponse,
+		RequestID: "req-1",
+		UserID:    "drv-1", // matches testCandidate's DriverID
+		Accepted:  &accepted,
+	})
+
+	routes := findMessagesOfType[DriverRouteMessage](sender)
+	if len(routes) != 1 {
+		t.Fatalf("expected 1 DriverRouteMessage, got %d (all msgs: %+v)", len(routes), sender.messages())
+	}
+	got := routes[0]
+	if got.Event != EventDriverRoute {
+		t.Errorf("Event: want %q, got %q", EventDriverRoute, got.Event)
+	}
+	if got.UserID != "pass-1" {
+		t.Errorf("UserID (recipient): want pass-1, got %q", got.UserID)
+	}
+	if got.RideID != "ride-1" {
+		t.Errorf("RideID: want ride-1, got %q", got.RideID)
+	}
+	if got.SubRideID != "sub-1" {
+		t.Errorf("SubRideID: want sub-1, got %q", got.SubRideID)
+	}
+	if got.DriverID != "drv-1" {
+		t.Errorf("DriverID: want drv-1, got %q", got.DriverID)
+	}
+	if got.RouteID != "route-1" {
+		t.Errorf("RouteID: want route-1, got %q", got.RouteID)
+	}
+
+	// Confirm the message is keyed by passenger_id (Kafka partitioning matches
+	// the existing driver-assigned send so the same partition fans both events).
+	for _, m := range sender.messages() {
+		if _, ok := m.value.(DriverRouteMessage); ok {
+			if m.key != "pass-1" {
+				t.Errorf("driver_route key: want pass-1, got %q", m.key)
+			}
+		}
+	}
+}

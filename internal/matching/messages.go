@@ -92,3 +92,36 @@ type DriverAssignedMessage struct {
 	PickupWalkM  float64       `json:"pickup_walk_m"`
 	DropoffWalkM float64       `json:"dropoff_walk_m"`
 }
+
+// Event names for the ride-notifications topic emitted as follow-ups to a
+// successful driver assignment. socketio-handler dispatches by user_id and
+// emits the named event directly to that user's socket.
+const (
+	EventDriverRoute       = "driver_route"
+	EventPassengerLocation = "passenger_location"
+)
+
+// DriverRouteMessage is sent to the passenger right after driver_assigned.
+// The passenger app uses route_id to fetch the full route from pathfinder
+// via the gateway (GET /api/pathfinder/routes/<route_id>) with its own JWT.
+type DriverRouteMessage struct {
+	UserID    string `json:"user_id"`
+	Event     string `json:"event"`
+	RideID    string `json:"ride_id"`
+	SubRideID string `json:"sub_ride_id"`
+	DriverID  string `json:"driver_id"`
+	RouteID   string `json:"route_id"`
+}
+
+// PassengerLocationMessage is a one-time snapshot of the passenger's last
+// known location, sent to the driver right after driver_assigned. Best-effort:
+// the rides service skips this event when the location is unavailable.
+type PassengerLocationMessage struct {
+	UserID      string  `json:"user_id"`
+	Event       string  `json:"event"`
+	RideID      string  `json:"ride_id"`
+	SubRideID   string  `json:"sub_ride_id"`
+	PassengerID string  `json:"passenger_id"`
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+}

@@ -232,6 +232,26 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 
 		slog.Info("driver accepted ride", "ride_id", currentOffer.RideID, "driver_id", currentOffer.DriverID, "passenger_id", req.PassengerID, "sub_ride_id", sr.SubRideID, "request_id", msg.RequestID)
 
+		// Notify the passenger of the driver's route so the passenger app can
+		// fetch route geometry from pathfinder by route_id. route_id is NOT NULL
+		// in the rides table, but we guard defensively against empty strings.
+		if currentOffer.RouteID == "" {
+			slog.Warn("driver_route notification skipped: empty route_id",
+				"ride_id", currentOffer.RideID, "passenger_id", req.PassengerID)
+		} else {
+			if err := om.producer.Send(ctx, TopicRideNotifications, req.PassengerID, DriverRouteMessage{
+				UserID:    req.PassengerID,
+				Event:     EventDriverRoute,
+				RideID:    currentOffer.RideID,
+				SubRideID: sr.SubRideID,
+				DriverID:  currentOffer.DriverID,
+				RouteID:   currentOffer.RouteID,
+			}); err != nil {
+				slog.Error("failed to send driver_route notification",
+					"ride_id", currentOffer.RideID, "passenger_id", req.PassengerID, "error", err)
+			}
+		}
+
 		om.mu.Lock()
 		om.cleanup(msg.RequestID)
 		om.mu.Unlock()
