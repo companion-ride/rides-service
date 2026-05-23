@@ -533,3 +533,63 @@ func TestHandleOfferResponse_Accept_EmitsDriverRoute(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleOfferResponse_Accept_EmitsPassengerLocation(t *testing.T) {
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{
+		"pass-1": {Lat: 43.2400, Lon: 76.9500},
+	}}
+	db := acceptingDB()
+	om := buildTestOM(t, db, sender, loc)
+	primeAcceptedOffer(om)
+
+	accepted := true
+	om.HandleOfferResponse(context.Background(), InboundMessage{
+		Action:    ActionOfferResponse,
+		RequestID: "req-1",
+		UserID:    "drv-1",
+		Accepted:  &accepted,
+	})
+
+	locs := findMessagesOfType[PassengerLocationMessage](sender)
+	if len(locs) != 1 {
+		t.Fatalf("expected 1 PassengerLocationMessage, got %d (all msgs: %+v)", len(locs), sender.messages())
+	}
+	got := locs[0]
+	if got.Event != EventPassengerLocation {
+		t.Errorf("Event: want %q, got %q", EventPassengerLocation, got.Event)
+	}
+	if got.UserID != "drv-1" {
+		t.Errorf("UserID (recipient): want drv-1, got %q", got.UserID)
+	}
+	if got.RideID != "ride-1" {
+		t.Errorf("RideID: want ride-1, got %q", got.RideID)
+	}
+	if got.SubRideID != "sub-1" {
+		t.Errorf("SubRideID: want sub-1, got %q", got.SubRideID)
+	}
+	if got.PassengerID != "pass-1" {
+		t.Errorf("PassengerID: want pass-1, got %q", got.PassengerID)
+	}
+	if got.Lat != 43.2400 {
+		t.Errorf("Lat: want 43.2400, got %v", got.Lat)
+	}
+	if got.Lon != 76.9500 {
+		t.Errorf("Lon: want 76.9500, got %v", got.Lon)
+	}
+
+	// Confirm Kafka key matches the recipient (driver) — same convention as
+	// other ride-notifications direct-to-user sends.
+	for _, m := range sender.messages() {
+		if _, ok := m.value.(PassengerLocationMessage); ok {
+			if m.key != "drv-1" {
+				t.Errorf("passenger_location key: want drv-1, got %q", m.key)
+			}
+		}
+	}
+
+	// Sanity: GetCurrentLocation was actually invoked for the passenger.
+	if loc.calls.Load() != 1 {
+		t.Errorf("expected 1 GetCurrentLocation call, got %d", loc.calls.Load())
+	}
+}

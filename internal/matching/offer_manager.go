@@ -252,6 +252,28 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 			}
 		}
 
+		// Send the driver a one-time snapshot of the passenger's current location.
+		// Best-effort: a missing/unavailable location must not fail the
+		// assignment. The location lookup is an HTTP call to location-service
+		// and must run outside om.mu.
+		if loc, err := om.location.GetCurrentLocation(ctx, req.PassengerID); err != nil {
+			slog.Warn("passenger_location notification skipped: location unavailable",
+				"passenger_id", req.PassengerID, "ride_id", currentOffer.RideID, "error", err)
+		} else {
+			if err := om.producer.Send(ctx, TopicRideNotifications, currentOffer.DriverID, PassengerLocationMessage{
+				UserID:      currentOffer.DriverID,
+				Event:       EventPassengerLocation,
+				RideID:      currentOffer.RideID,
+				SubRideID:   sr.SubRideID,
+				PassengerID: req.PassengerID,
+				Lat:         loc.Lat,
+				Lon:         loc.Lon,
+			}); err != nil {
+				slog.Error("failed to send passenger_location notification",
+					"ride_id", currentOffer.RideID, "driver_id", currentOffer.DriverID, "error", err)
+			}
+		}
+
 		om.mu.Lock()
 		om.cleanup(msg.RequestID)
 		om.mu.Unlock()
