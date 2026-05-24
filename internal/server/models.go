@@ -2,6 +2,21 @@ package server
 
 import "time"
 
+type CustomCoord struct {
+	Lat float64 `json:"lat" binding:"min=-90,max=90"`
+	Lon float64 `json:"lon" binding:"min=-180,max=180"`
+}
+
+type RouteSegment struct {
+	Coords []CustomCoord `json:"coords" binding:"required,min=2,dive"`
+}
+
+type CreateDriverCustomPathRequest struct {
+	DriverID      string         `json:"driver_id" binding:"required,uuid"`
+	Segments      []RouteSegment `json:"segments" binding:"required,min=1,dive"`
+	MaxPassengers int            `json:"max_passengers"`
+}
+
 type Coord struct {
 	Lat float64 `json:"lat" binding:"required,min=-90,max=90"`
 	Lon float64 `json:"lon" binding:"required,min=-180,max=180"`

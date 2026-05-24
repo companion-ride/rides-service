@@ -322,6 +322,113 @@ func (s *Server) MatchPassengerHandler(c *gin.Context) {
 }
 
 
+// CreateDriverCustomPathHandler godoc
+//
+//	@Summary	Create a driver path from a custom (driver-drawn) polyline
+//	@Description	Forwards caller-supplied coordinate segments to pathfinder (no 2GIS), persists the result as a pending ride, and returns the ride id. The caller's JWT must match driver_id.
+//	@Tags		rides
+//	@Security	BearerAuth
+//	@Accept		json
+//	@Produce	json
+//	@Param		body	body		CreateDriverCustomPathRequest	true	"Driver id and route segments"
+//	@Success	201		{object}	CreateDriverPathResponse
+//	@Failure	400		{object}	map[string]string
+//	@Failure	401		{object}	map[string]string
+//	@Failure	403		{object}	map[string]string
+//	@Failure	500		{object}	map[string]string
+//	@Failure	502		{object}	map[string]string
+//	@Router		/ride/driver/custom-path [post]
+func (s *Server) CreateDriverCustomPathHandler(c *gin.Context) {
+	var req CreateDriverCustomPathRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	total := 0
+	for _, seg := range req.Segments {
+		total += len(seg.Coords)
+	}
+	if total > 500 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "too many coordinates (max 500)"})
+		return
+	}
+
+	if req.DriverID != auth.GetUserID(c) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "user ID mismatch"})
+		return
+	}
+
+	routeResp, err := s.pathfinder.CreateCustomRoute(c.Request.Context(), c.GetHeader("Authorization"), toSegmentInputs(req.Segments))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to create route: " + err.Error()})
+		return
+	}
+
+	wkt := segmentsToWKT(routeResp.Segments)
+	if wkt == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "empty route geometry"})
+		return
+	}
+
+	totalDuration := parseDuration(routeResp.TotalDuration)
+
+	maxPass := req.MaxPassengers
+	if maxPass <= 0 {
+		maxPass = 3
+	}
+	mp := s.matchingParams.Get()
+	if maxPass > mp.MaxPassengers {
+		maxPass = mp.MaxPassengers
+	}
+
+	// Start/finish from the request — the single source of truth. Pathfinder only
+	// dedupes consecutive-identical coords, so first/last are always preserved.
+	firstSeg := req.Segments[0]
+	lastSeg := req.Segments[len(req.Segments)-1]
+	start := firstSeg.Coords[0]
+	finish := lastSeg.Coords[len(lastSeg.Coords)-1]
+
+	ride := &database.Ride{
+		DriverID:      req.DriverID,
+		RouteID:       routeResp.RouteID,
+		GeometryWKT:   wkt,
+		StartLat:      start.Lat,
+		StartLon:      start.Lon,
+		FinishLat:     finish.Lat,
+		FinishLon:     finish.Lon,
+		TotalDuration: totalDuration,
+		MaxPassengers: maxPass,
+		Status:        database.StatusPending,
+	}
+
+	if err := s.db.CreateRide(c.Request.Context(), ride); err != nil {
+		slog.Error("orphaned route: pathfinder route created but local ride insert failed", "route_id", routeResp.RouteID, "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save ride"})
+		return
+	}
+
+	slog.Info("custom ride created", "ride_id", ride.RideID, "route_id", routeResp.RouteID, "driver_id", req.DriverID, "segment_count", len(req.Segments))
+
+	c.JSON(http.StatusCreated, CreateDriverPathResponse{
+		RideID:  ride.RideID,
+		RouteID: routeResp.RouteID,
+		Status:  ride.Status,
+	})
+}
+
+func toSegmentInputs(segments []RouteSegment) []pathfinder.SegmentInput {
+	out := make([]pathfinder.SegmentInput, len(segments))
+	for i, seg := range segments {
+		coords := make([]pathfinder.Coord, len(seg.Coords))
+		for j, co := range seg.Coords {
+			coords[j] = pathfinder.Coord{Lat: co.Lat, Lon: co.Lon}
+		}
+		out[i] = pathfinder.SegmentInput{Coords: coords}
+	}
+	return out
+}
+
 func segmentsToWKT(segments []pathfinder.Segment) string {
 	var points []string
 	for _, seg := range segments {
