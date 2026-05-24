@@ -43,6 +43,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	protectedRide := protected.Group("/ride")
 	protectedRide.POST("/driver/path", s.CreateDriverPathHandler)
+	protectedRide.POST("/driver/custom-path", s.CreateDriverCustomPathHandler)
 	protectedRide.POST("/passenger/match", s.MatchPassengerHandler)
 
 	protected.GET("/rides/history", s.RideHistoryHandler)

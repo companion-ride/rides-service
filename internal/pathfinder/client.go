@@ -28,6 +28,10 @@ type Coord struct {
 	Lat float64 `json:"lat"`
 }
 
+type SegmentInput struct {
+	Coords []Coord `json:"coords"`
+}
+
 type Segment struct {
 	Coords      []Coord  `json:"coords"`
 	Color       string   `json:"color"`
@@ -65,6 +69,38 @@ func (c *Client) CreateRoute(ctx context.Context, authHeader string, startLat, s
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/routes", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("calling pathfinder: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("pathfinder returned status %d", resp.StatusCode)
+	}
+
+	var result RouteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) CreateCustomRoute(ctx context.Context, authHeader string, segments []SegmentInput) (*RouteResponse, error) {
+	body, err := json.Marshal(map[string]any{"segments": segments})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/routes/custom", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
