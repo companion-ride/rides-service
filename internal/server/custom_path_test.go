@@ -247,6 +247,51 @@ func TestCustomPath_OrphanedRouteOnDBFailure(t *testing.T) {
 	}
 }
 
+func TestCustomPath_MaxPassengersDefault(t *testing.T) {
+	pf := &fakePathfinder{resp: cannedRouteResp()}
+	db := &fakeDB{}
+	s := newCustomTestServer(pf, db)
+	// max_passengers omitted → defaults to 3 (DefaultMatchingParams ceiling).
+	body := `{"driver_id":"` + testUserID + `","segments":[{"coords":[{"lat":51.10,"lon":71.40},{"lat":51.11,"lon":71.41}]}]}`
+	rr := doCustomPath(t, s, testUserID, body)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("got %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if db.created.MaxPassengers != 3 {
+		t.Errorf("max_passengers default = %d, want 3", db.created.MaxPassengers)
+	}
+}
+
+func TestCustomPath_MaxPassengersClampedToCeiling(t *testing.T) {
+	pf := &fakePathfinder{resp: cannedRouteResp()}
+	db := &fakeDB{}
+	s := newCustomTestServer(pf, db)
+	// max_passengers=10 exceeds the DefaultMatchingParams ceiling (3) → clamped.
+	body := `{"driver_id":"` + testUserID + `","segments":[{"coords":[{"lat":51.10,"lon":71.40},{"lat":51.11,"lon":71.41}]}],"max_passengers":10}`
+	rr := doCustomPath(t, s, testUserID, body)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("got %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if db.created.MaxPassengers != 3 {
+		t.Errorf("max_passengers clamp = %d, want 3", db.created.MaxPassengers)
+	}
+}
+
+func TestCustomPath_EmptyPathfinderGeometry(t *testing.T) {
+	// Pathfinder returns no segments → segmentsToWKT yields "" → 500, no ride saved.
+	pf := &fakePathfinder{resp: &pathfinder.RouteResponse{RouteID: "route-empty", Segments: nil}}
+	db := &fakeDB{}
+	s := newCustomTestServer(pf, db)
+	body := `{"driver_id":"` + testUserID + `","segments":[{"coords":[{"lat":51.10,"lon":71.40},{"lat":51.11,"lon":71.41}]}]}`
+	rr := doCustomPath(t, s, testUserID, body)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500; body=%s", rr.Code, rr.Body.String())
+	}
+	if db.createCalls != 0 {
+		t.Error("CreateRide should not be called when geometry is empty")
+	}
+}
+
 var errTest = &testError{}
 
 type testError struct{}
