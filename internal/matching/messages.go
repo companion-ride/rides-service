@@ -125,3 +125,23 @@ type PassengerLocationMessage struct {
 	Lat         float64 `json:"lat"`
 	Lon         float64 `json:"lon"`
 }
+
+// EventSubRideCancelled is emitted to ride-notifications when a single
+// sub-ride is cancelled (driven by a passenger cancel). Distinct from the
+// ride-wide ride_update:cancelled event that the driver-cancel path emits.
+const EventSubRideCancelled = "sub_ride_cancelled"
+
+// SubRideCancelledMessage is sent on TopicRideNotifications to inform the
+// driver that a specific passenger's sub-ride has been cancelled, and to
+// confirm the cancel back to the cancelling passenger. The PassengerID and
+// Reason fields are populated only on the driver-bound copy; they are left
+// at zero-value (and omitted from JSON via omitempty) on the
+// passenger-bound confirmation.
+type SubRideCancelledMessage struct {
+	UserID      string `json:"user_id"`
+	Event       string `json:"event"`
+	RideID      string `json:"ride_id"`
+	SubRideID   string `json:"sub_ride_id"`
+	PassengerID string `json:"passenger_id,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
