@@ -2,7 +2,9 @@ package matching
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -323,7 +325,38 @@ func (h *Handler) handleRideCancel(ctx context.Context, msg InboundMessage) {
 // new handlePassengerCancel (when the caller is a matched passenger). A
 // caller who is neither receives "not a participant in this ride".
 func (h *Handler) handleCancel(ctx context.Context, msg InboundMessage) {
-	// Body added in Task 5. Stub returns immediately so the file compiles.
+	ride, err := h.db.GetRide(ctx, msg.RideID)
+	if err != nil {
+		slog.Error("failed to get ride", "ride_id", msg.RideID, "error", err)
+		h.sendError(ctx, msg.UserID, msg.RideID, "internal error")
+		return
+	}
+
+	if ride.DriverID == msg.UserID {
+		h.handleRideCancel(ctx, msg)
+		return
+	}
+
+	subRide, err := h.db.GetSubRideByRideAndPassenger(ctx, msg.RideID, msg.UserID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("non-participant attempted to cancel ride", "user_id", msg.UserID, "ride_id", msg.RideID)
+			h.sendError(ctx, msg.UserID, msg.RideID, "not a participant in this ride")
+			return
+		}
+		slog.Error("failed to look up sub-ride for cancel", "user_id", msg.UserID, "ride_id", msg.RideID, "error", err)
+		h.sendError(ctx, msg.UserID, msg.RideID, "internal error")
+		return
+	}
+
+	h.handlePassengerCancel(ctx, msg, ride, subRide)
+}
+
+// handlePassengerCancel atomically flips a single sub-ride to cancelled and
+// notifies both the driver and the cancelling passenger. Body filled in Task 6.
+func (h *Handler) handlePassengerCancel(ctx context.Context, msg InboundMessage, ride *database.Ride, subRide *database.SubRide) {
 	_ = ctx
 	_ = msg
+	_ = ride
+	_ = subRide
 }
