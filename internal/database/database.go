@@ -185,6 +185,7 @@ type Service interface {
 	CreateSubRide(ctx context.Context, subRide *SubRide) error
 	CreateSubRideWithCapacityCheck(ctx context.Context, subRide *SubRide) error
 	GetSubRide(ctx context.Context, subRideID string) (*SubRide, error)
+	GetSubRideByRideAndPassenger(ctx context.Context, rideID, passengerID string) (*SubRide, error)
 	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
 	UpdateSubRideStatus(ctx context.Context, subRideID, status string) error
 	CancelActiveSubRides(ctx context.Context, rideID string) error
@@ -657,6 +658,22 @@ func (s *service) GetSubRide(ctx context.Context, subRideID string) (*SubRide, e
 		        dropoff_lat, dropoff_lon, start_lat, start_lon, finish_lat, finish_lon, status
 		 FROM sub_rides WHERE sub_ride_id = $1`,
 		subRideID,
+	).Scan(&sr.SubRideID, &sr.RideID, &sr.PassengerID,
+		&sr.PickupLat, &sr.PickupLon, &sr.DropoffLat, &sr.DropoffLon,
+		&sr.StartLat, &sr.StartLon, &sr.FinishLat, &sr.FinishLon, &sr.Status)
+	if err != nil {
+		return nil, err
+	}
+	return &sr, nil
+}
+
+func (s *service) GetSubRideByRideAndPassenger(ctx context.Context, rideID, passengerID string) (*SubRide, error) {
+	var sr SubRide
+	err := s.db.QueryRowContext(ctx,
+		`SELECT sub_ride_id, ride_id, passenger_id, pickup_lat, pickup_lon,
+		        dropoff_lat, dropoff_lon, start_lat, start_lon, finish_lat, finish_lon, status
+		 FROM sub_rides WHERE ride_id = $1 AND passenger_id = $2 LIMIT 1`,
+		rideID, passengerID,
 	).Scan(&sr.SubRideID, &sr.RideID, &sr.PassengerID,
 		&sr.PickupLat, &sr.PickupLon, &sr.DropoffLat, &sr.DropoffLon,
 		&sr.StartLat, &sr.StartLon, &sr.FinishLat, &sr.FinishLon, &sr.Status)
