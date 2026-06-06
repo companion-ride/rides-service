@@ -231,6 +231,17 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 			slog.Error("failed to send driver assigned", "ride_id", currentOffer.RideID, "passenger_id", req.PassengerID, "error", err)
 		}
 
+		// Notify chat-service so it can create the driver↔passenger chat room
+		// and add this passenger (idempotent on the chat side for shared rides).
+		if err := om.producer.Send(ctx, TopicRideEvents, currentOffer.RideID, RideEvent{
+			Event:       ChatEventDriverAssigned,
+			RideID:      currentOffer.RideID,
+			DriverID:    currentOffer.DriverID,
+			PassengerID: req.PassengerID,
+		}); err != nil {
+			slog.Error("failed to send ride event for chat", "ride_id", currentOffer.RideID, "passenger_id", req.PassengerID, "error", err)
+		}
+
 		slog.Info("driver accepted ride", "ride_id", currentOffer.RideID, "driver_id", currentOffer.DriverID, "passenger_id", req.PassengerID, "sub_ride_id", sr.SubRideID, "request_id", msg.RequestID)
 
 		// Notify the passenger of the driver's route so the passenger app can

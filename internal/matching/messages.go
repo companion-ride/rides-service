@@ -6,7 +6,27 @@ const (
 	TopicRideNotifications = "ride-notifications"
 	TopicRideUpdates       = "ride-updates"
 	TopicDriverAssigned    = "driver-assigned"
+	// TopicRideEvents carries ride lifecycle events consumed by chat-service to
+	// create/close the driver↔passenger chat room. Must stay in sync with
+	// chat-service's TopicRideEvents.
+	TopicRideEvents = "ride-events"
 )
+
+// Chat ride-event names (must match chat-service ride_handler.go).
+const (
+	ChatEventDriverAssigned = "driver_assigned"
+	ChatEventRideCompleted  = "ride_completed"
+	ChatEventRideCancelled  = "ride_cancelled"
+)
+
+// RideEvent is published to TopicRideEvents and consumed by chat-service to
+// manage the ride chat room. Field shape must match chat-service's RideEvent.
+type RideEvent struct {
+	Event       string `json:"event"`
+	RideID      string `json:"ride_id"`
+	DriverID    string `json:"driver_id,omitempty"`
+	PassengerID string `json:"passenger_id,omitempty"`
+}
 
 // Actions (inbound from ride-requests topic)
 const (
@@ -52,23 +72,23 @@ type OutboundCoord struct {
 
 // NotificationMessage is sent to ride-notifications topic (direct-to-user).
 type NotificationMessage struct {
-	UserID         string        `json:"user_id"`
-	Event          string        `json:"event"`
-	RequestID      string        `json:"request_id,omitempty"`
-	PassengerID    string        `json:"passenger_id,omitempty"`
-	RideID         string        `json:"ride_id,omitempty"`
-	SubRideID      string        `json:"sub_ride_id,omitempty"`
-	Price          int           `json:"price,omitempty"`
-	Preferences    []string      `json:"preferences,omitempty"`
-	Baggage        string        `json:"baggage,omitempty"`
-	Comment        string        `json:"comment,omitempty"`
+	UserID         string         `json:"user_id"`
+	Event          string         `json:"event"`
+	RequestID      string         `json:"request_id,omitempty"`
+	PassengerID    string         `json:"passenger_id,omitempty"`
+	RideID         string         `json:"ride_id,omitempty"`
+	SubRideID      string         `json:"sub_ride_id,omitempty"`
+	Price          int            `json:"price,omitempty"`
+	Preferences    []string       `json:"preferences,omitempty"`
+	Baggage        string         `json:"baggage,omitempty"`
+	Comment        string         `json:"comment,omitempty"`
 	Pickup         *OutboundCoord `json:"pickup,omitempty"`
 	Dropoff        *OutboundCoord `json:"dropoff,omitempty"`
-	PickupWalkM    float64       `json:"pickup_walk_m,omitempty"`
-	DropoffWalkM   float64       `json:"dropoff_walk_m,omitempty"`
-	TimeoutSeconds int           `json:"timeout_seconds,omitempty"`
-	Reason         string        `json:"reason,omitempty"`
-	Message        string        `json:"message,omitempty"`
+	PickupWalkM    float64        `json:"pickup_walk_m,omitempty"`
+	DropoffWalkM   float64        `json:"dropoff_walk_m,omitempty"`
+	TimeoutSeconds int            `json:"timeout_seconds,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	Message        string         `json:"message,omitempty"`
 }
 
 // RideUpdateMessage is sent to ride-updates topic (broadcast to room).

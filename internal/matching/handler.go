@@ -254,6 +254,14 @@ func (h *Handler) handleRideFinish(ctx context.Context, msg InboundMessage) {
 		slog.Error("failed to send ride update", "ride_id", msg.RideID, "error", err)
 	}
 
+	// Let chat-service start the 24h close timer on the ride chat room.
+	if err := h.producer.Send(ctx, TopicRideEvents, msg.RideID, RideEvent{
+		Event:  ChatEventRideCompleted,
+		RideID: msg.RideID,
+	}); err != nil {
+		slog.Error("failed to send ride event for chat", "ride_id", msg.RideID, "error", err)
+	}
+
 	slog.Info("ride finished", "ride_id", msg.RideID, "driver_id", msg.UserID)
 }
 
@@ -299,6 +307,14 @@ func (h *Handler) handleRideCancel(ctx context.Context, msg InboundMessage) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		slog.Error("failed to send ride update", "ride_id", msg.RideID, "error", err)
+	}
+
+	// Let chat-service close the ride chat room immediately.
+	if err := h.producer.Send(ctx, TopicRideEvents, msg.RideID, RideEvent{
+		Event:  ChatEventRideCancelled,
+		RideID: msg.RideID,
+	}); err != nil {
+		slog.Error("failed to send ride event for chat", "ride_id", msg.RideID, "error", err)
 	}
 
 	slog.Info("ride cancelled", "ride_id", msg.RideID, "driver_id", msg.UserID)
