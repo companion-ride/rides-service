@@ -382,6 +382,99 @@ func TestHandleCancel_Passenger_CancelDBError(t *testing.T) {
 	}
 }
 
-// Ensure sql and json are referenced so they remain importable for later tasks.
-var _ = sql.ErrNoRows
-var _ = json.Marshal
+func TestHandleCancel_Stranger_Rejected(t *testing.T) {
+	const rideID = "ride-1"
+	const driverID = "driver-1"
+
+	db := &handlerMockDB{
+		GetRideFunc: func(ctx context.Context, id string) (*database.Ride, error) {
+			return &database.Ride{RideID: rideID, DriverID: driverID, Status: database.StatusPending}, nil
+		},
+		GetSubRideByRideAndPassengerFunc: func(ctx context.Context, rID, pID string) (*database.SubRide, error) {
+			return nil, sql.ErrNoRows
+		},
+	}
+	sender := &mockSender{}
+	h := &Handler{db: db, producer: sender}
+
+	h.handleCancel(context.Background(), InboundMessage{
+		Action: ActionCancel, RideID: rideID, UserID: "stranger-1",
+	})
+
+	errEvt := firstNotificationByEvent(sender, "ride_error")
+	if errEvt == nil {
+		t.Fatal("expected ride_error notification")
+	}
+	if errEvt.UserID != "stranger-1" {
+		t.Errorf("expected ride_error to stranger-1, got %s", errEvt.UserID)
+	}
+	if errEvt.Message != "not a participant in this ride" {
+		t.Errorf("unexpected error message: %s", errEvt.Message)
+	}
+	if firstSubRideCancelledFor(sender, driverID) != nil {
+		t.Errorf("no sub_ride_cancelled should fire for a stranger")
+	}
+}
+
+func TestHandleCancel_Passenger_ReasonPropagation_OmitemptyOnPassengerCopy(t *testing.T) {
+	const rideID = "ride-1"
+	const driverID = "driver-1"
+	const passengerID = "pass-1"
+	const subRideID = "sub-1"
+	const reason = "took a different ride"
+
+	db := &handlerMockDB{
+		GetRideFunc: func(ctx context.Context, id string) (*database.Ride, error) {
+			return &database.Ride{RideID: rideID, DriverID: driverID, Status: database.StatusPending}, nil
+		},
+		GetSubRideByRideAndPassengerFunc: func(ctx context.Context, rID, pID string) (*database.SubRide, error) {
+			return &database.SubRide{SubRideID: subRideID, RideID: rideID, PassengerID: passengerID, Status: database.StatusPending}, nil
+		},
+		CancelSubRideIfActiveFunc: func(ctx context.Context, id string) (bool, error) { return true, nil },
+	}
+	sender := &mockSender{}
+	h := &Handler{db: db, producer: sender}
+
+	h.handleCancel(context.Background(), InboundMessage{
+		Action: ActionCancel, RideID: rideID, UserID: passengerID, Reason: reason,
+	})
+
+	// Driver-bound: must carry reason AND passenger_id.
+	driverEvt := firstSubRideCancelledFor(sender, driverID)
+	if driverEvt == nil {
+		t.Fatal("expected driver-bound sub_ride_cancelled")
+	}
+	if driverEvt.Reason != reason {
+		t.Errorf("driver event reason: want %q, got %q", reason, driverEvt.Reason)
+	}
+	if driverEvt.PassengerID != passengerID {
+		t.Errorf("driver event passenger_id: want %s, got %s", passengerID, driverEvt.PassengerID)
+	}
+
+	// Passenger-bound: Go struct must have zero-value Reason and PassengerID,
+	// AND when marshalled to JSON omitempty must omit both keys entirely.
+	passEvt := firstSubRideCancelledFor(sender, passengerID)
+	if passEvt == nil {
+		t.Fatal("expected passenger-bound sub_ride_cancelled")
+	}
+	if passEvt.Reason != "" {
+		t.Errorf("passenger event Reason must be zero-value, got %q", passEvt.Reason)
+	}
+	if passEvt.PassengerID != "" {
+		t.Errorf("passenger event PassengerID must be zero-value, got %q", passEvt.PassengerID)
+	}
+	raw, err := json.Marshal(passEvt)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	asMap := map[string]any{}
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, present := asMap["reason"]; present {
+		t.Errorf("passenger-bound JSON must not contain \"reason\" key, got: %s", string(raw))
+	}
+	if _, present := asMap["passenger_id"]; present {
+		t.Errorf("passenger-bound JSON must not contain \"passenger_id\" key, got: %s", string(raw))
+	}
+}
