@@ -9,17 +9,31 @@ import (
 	"rides/internal/database"
 )
 
+// HandlerDB abstracts the subset of database.Service that Handler needs.
+// Kept narrow so handler_test.go can stub it without implementing the full
+// Service. Mirrors the pattern used by OfferManager (matching.DB).
+type HandlerDB interface {
+	GetRide(ctx context.Context, rideID string) (*database.Ride, error)
+	GetSubRide(ctx context.Context, subRideID string) (*database.SubRide, error)
+	GetSubRideByRideAndPassenger(ctx context.Context, rideID, passengerID string) (*database.SubRide, error)
+	UpdateRideStatus(ctx context.Context, rideID, status string) error
+	UpdateSubRideStatus(ctx context.Context, subRideID, status string) error
+	CancelActiveSubRides(ctx context.Context, rideID string) error
+	CancelSubRideIfActive(ctx context.Context, subRideID string) (bool, error)
+	AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error)
+}
+
 // Handler processes inbound messages from the ride-requests Kafka topic.
 type Handler struct {
 	offerManager *OfferManager
-	db           database.Service
+	db           HandlerDB
 	producer     MessageSender
 }
 
 // NewHandler creates a Handler with all dependencies.
 func NewHandler(
 	om *OfferManager,
-	db database.Service,
+	db HandlerDB,
 	producer MessageSender,
 ) *Handler {
 	return &Handler{
@@ -72,7 +86,7 @@ func (h *Handler) HandleMessage(ctx context.Context, value []byte) {
 	case ActionRideFinish:
 		h.handleRideFinish(ctx, msg)
 	case ActionCancel:
-		h.handleRideCancel(ctx, msg)
+		h.handleCancel(ctx, msg)
 	default:
 		slog.Warn("unknown action in kafka message", "action", msg.Action)
 	}
@@ -302,4 +316,14 @@ func (h *Handler) handleRideCancel(ctx context.Context, msg InboundMessage) {
 	}
 
 	slog.Info("ride cancelled", "ride_id", msg.RideID, "driver_id", msg.UserID)
+}
+
+// handleCancel routes an ActionCancel inbound message to either the existing
+// driver-side handleRideCancel (when the caller is the ride's driver) or the
+// new handlePassengerCancel (when the caller is a matched passenger). A
+// caller who is neither receives "not a participant in this ride".
+func (h *Handler) handleCancel(ctx context.Context, msg InboundMessage) {
+	// Body added in Task 5. Stub returns immediately so the file compiles.
+	_ = ctx
+	_ = msg
 }
