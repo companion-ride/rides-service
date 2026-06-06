@@ -222,6 +222,7 @@ func (om *OfferManager) HandleOfferResponse(ctx context.Context, msg InboundMess
 			PassengerID:  req.PassengerID,
 			DriverID:     currentOffer.DriverID,
 			SubRideID:    sr.SubRideID,
+			RouteID:      currentOffer.RouteID,
 			PickupPoint:  OutboundCoord{Lat: currentOffer.PickupPointLat, Lon: currentOffer.PickupPointLon},
 			DropoffPoint: OutboundCoord{Lat: currentOffer.DropoffPointLat, Lon: currentOffer.DropoffPointLon},
 			PickupWalkM:  currentOffer.PickupWalkM,
