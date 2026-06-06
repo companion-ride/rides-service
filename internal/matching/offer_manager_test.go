@@ -534,6 +534,40 @@ func TestHandleOfferResponse_Accept_EmitsDriverRoute(t *testing.T) {
 	}
 }
 
+func TestHandleOfferResponse_Accept_DriverAssignedIncludesRouteID(t *testing.T) {
+	sender := &mockSender{}
+	loc := &mockLocation{locations: map[string]*location.Location{
+		"pass-1": {Lat: 43.238, Lon: 76.945},
+	}}
+	db := acceptingDB()
+	om := buildTestOM(t, db, sender, loc)
+	primeAcceptedOffer(om)
+
+	accepted := true
+	om.HandleOfferResponse(context.Background(), InboundMessage{
+		Action:    ActionOfferResponse,
+		RequestID: "req-1",
+		UserID:    "drv-1",
+		Accepted:  &accepted,
+	})
+
+	var assigns []DriverAssignedMessage
+	for _, m := range sender.messages() {
+		if m.topic != TopicDriverAssigned {
+			continue
+		}
+		if v, ok := m.value.(DriverAssignedMessage); ok {
+			assigns = append(assigns, v)
+		}
+	}
+	if len(assigns) != 1 {
+		t.Fatalf("expected 1 DriverAssignedMessage, got %d (all msgs: %+v)", len(assigns), sender.messages())
+	}
+	if got := assigns[0].RouteID; got != "route-1" {
+		t.Errorf("DriverAssignedMessage.RouteID: want route-1, got %q", got)
+	}
+}
+
 func TestHandleOfferResponse_Accept_EmitsPassengerLocation(t *testing.T) {
 	sender := &mockSender{}
 	loc := &mockLocation{locations: map[string]*location.Location{

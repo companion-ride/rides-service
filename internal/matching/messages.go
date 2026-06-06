@@ -82,11 +82,14 @@ type RideUpdateMessage struct {
 }
 
 // DriverAssignedMessage is sent to driver-assigned topic.
+// RouteID is included so the passenger app can fetch the driver's route
+// geometry from pathfinder without waiting for the follow-up driver_route event.
 type DriverAssignedMessage struct {
 	RideID       string        `json:"ride_id"`
 	PassengerID  string        `json:"passenger_id"`
 	DriverID     string        `json:"driver_id"`
 	SubRideID    string        `json:"sub_ride_id"`
+	RouteID      string        `json:"route_id"`
 	PickupPoint  OutboundCoord `json:"pickup_point"`
 	DropoffPoint OutboundCoord `json:"dropoff_point"`
 	PickupWalkM  float64       `json:"pickup_walk_m"`
