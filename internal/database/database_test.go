@@ -183,3 +183,102 @@ func TestGetRideStatus(t *testing.T) {
 		}
 	})
 }
+
+func TestGetSubRideByRideAndPassenger_Found(t *testing.T) {
+	dbOnce = sync.Once{}
+	dbInstance = nil
+	srv := New(testConnStr)
+	ctx := context.Background()
+
+	if _, err := srv.DeleteAllRides(ctx); err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+
+	ride := &Ride{
+		DriverID:      "11111111-1111-1111-1111-111111111111",
+		RouteID:       "22222222-2222-2222-2222-222222222222",
+		GeometryWKT:   "LINESTRING(71.40 51.10, 71.45 51.15)",
+		StartLat:      51.10, StartLon: 71.40,
+		FinishLat:     51.15, FinishLon: 71.45,
+		TotalDuration: 600,
+		MaxPassengers: 3,
+		Status:        StatusPending,
+	}
+	if err := srv.CreateRide(ctx, ride); err != nil {
+		t.Fatalf("CreateRide: %v", err)
+	}
+
+	srA := &SubRide{
+		RideID:      ride.RideID,
+		PassengerID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		PickupLat:   51.11, PickupLon: 71.41,
+		DropoffLat:  51.14, DropoffLon: 71.44,
+		StartLat:    51.11, StartLon: 71.41,
+		FinishLat:   51.14, FinishLon: 71.44,
+		Status:      StatusPending,
+	}
+	srB := &SubRide{
+		RideID:      ride.RideID,
+		PassengerID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+		PickupLat:   51.12, PickupLon: 71.42,
+		DropoffLat:  51.13, DropoffLon: 71.43,
+		StartLat:    51.12, StartLon: 71.42,
+		FinishLat:   51.13, FinishLon: 71.43,
+		Status:      StatusPickedUp,
+	}
+	if err := srv.CreateSubRide(ctx, srA); err != nil {
+		t.Fatalf("CreateSubRide A: %v", err)
+	}
+	if err := srv.CreateSubRide(ctx, srB); err != nil {
+		t.Fatalf("CreateSubRide B: %v", err)
+	}
+
+	got, err := srv.GetSubRideByRideAndPassenger(ctx, ride.RideID, srA.PassengerID)
+	if err != nil {
+		t.Fatalf("GetSubRideByRideAndPassenger: %v", err)
+	}
+	if got.SubRideID != srA.SubRideID {
+		t.Errorf("expected sub_ride_id %s, got %s", srA.SubRideID, got.SubRideID)
+	}
+	if got.Status != StatusPending {
+		t.Errorf("expected status pending, got %s", got.Status)
+	}
+
+	gotB, err := srv.GetSubRideByRideAndPassenger(ctx, ride.RideID, srB.PassengerID)
+	if err != nil {
+		t.Fatalf("GetSubRideByRideAndPassenger B: %v", err)
+	}
+	if gotB.SubRideID != srB.SubRideID {
+		t.Errorf("expected sub_ride_id %s, got %s", srB.SubRideID, gotB.SubRideID)
+	}
+}
+
+func TestGetSubRideByRideAndPassenger_NotFound(t *testing.T) {
+	dbOnce = sync.Once{}
+	dbInstance = nil
+	srv := New(testConnStr)
+	ctx := context.Background()
+
+	if _, err := srv.DeleteAllRides(ctx); err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+
+	ride := &Ride{
+		DriverID:      "11111111-1111-1111-1111-111111111111",
+		RouteID:       "22222222-2222-2222-2222-222222222222",
+		GeometryWKT:   "LINESTRING(71.40 51.10, 71.45 51.15)",
+		StartLat:      51.10, StartLon: 71.40,
+		FinishLat:     51.15, FinishLon: 71.45,
+		TotalDuration: 600,
+		MaxPassengers: 3,
+		Status:        StatusPending,
+	}
+	if err := srv.CreateRide(ctx, ride); err != nil {
+		t.Fatalf("CreateRide: %v", err)
+	}
+
+	_, err := srv.GetSubRideByRideAndPassenger(ctx, ride.RideID, "cccccccc-cccc-cccc-cccc-cccccccccccc")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expected sql.ErrNoRows, got %v", err)
+	}
+}
