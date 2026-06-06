@@ -189,6 +189,7 @@ type Service interface {
 	CountActiveSubRides(ctx context.Context, rideID string) (int, error)
 	UpdateSubRideStatus(ctx context.Context, subRideID, status string) error
 	CancelActiveSubRides(ctx context.Context, rideID string) error
+	CancelSubRideIfActive(ctx context.Context, subRideID string) (didCancel bool, err error)
 	AreAllSubRidesFinished(ctx context.Context, rideID string) (bool, error)
 
 	FindMatchingRides(ctx context.Context, params MatchParams) ([]MatchResult, error)
@@ -705,6 +706,28 @@ func (s *service) CancelActiveSubRides(ctx context.Context, rideID string) error
 		rideID,
 	)
 	return err
+}
+
+// CancelSubRideIfActive atomically transitions a single sub-ride to
+// 'cancelled' iff its current status is 'pending' or 'picked_up'. Returns
+// didCancel=true if 1 row was affected, false if 0 rows (already in a
+// terminal state — idempotent). The atomic conditional UPDATE serializes
+// concurrent callers via Postgres row locking, so duplicate cancel events
+// to the driver are impossible.
+func (s *service) CancelSubRideIfActive(ctx context.Context, subRideID string) (bool, error) {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE sub_rides SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+		 WHERE sub_ride_id = $1 AND status IN ('pending', 'picked_up')`,
+		subRideID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
 func (s *service) DeleteAllRides(ctx context.Context) (int, error) {
