@@ -156,6 +156,87 @@ func TestHandleCancel_DriverPath_RoutesToRideCancel(t *testing.T) {
 	}
 }
 
+func TestHandleCancel_Passenger_HappyPath_Pending(t *testing.T) {
+	const rideID = "ride-1"
+	const driverID = "driver-1"
+	const passengerID = "pass-1"
+	const subRideID = "sub-1"
+
+	db := &handlerMockDB{
+		GetRideFunc: func(ctx context.Context, id string) (*database.Ride, error) {
+			return &database.Ride{RideID: rideID, DriverID: driverID, Status: database.StatusPending}, nil
+		},
+		GetSubRideByRideAndPassengerFunc: func(ctx context.Context, rID, pID string) (*database.SubRide, error) {
+			return &database.SubRide{SubRideID: subRideID, RideID: rideID, PassengerID: passengerID, Status: database.StatusPending}, nil
+		},
+		CancelSubRideIfActiveFunc: func(ctx context.Context, id string) (bool, error) {
+			if id != subRideID {
+				t.Fatalf("CancelSubRideIfActive called with %s, want %s", id, subRideID)
+			}
+			return true, nil
+		},
+	}
+	sender := &mockSender{}
+	h := &Handler{db: db, producer: sender}
+
+	h.handleCancel(context.Background(), InboundMessage{
+		Action: ActionCancel, RideID: rideID, UserID: passengerID, Reason: "changed mind",
+	})
+
+	driverEvt := firstSubRideCancelledFor(sender, driverID)
+	if driverEvt == nil {
+		t.Fatal("expected sub_ride_cancelled to driver, none sent")
+	}
+	if driverEvt.SubRideID != subRideID || driverEvt.RideID != rideID || driverEvt.PassengerID != passengerID || driverEvt.Reason != "changed mind" {
+		t.Errorf("driver event fields wrong: %+v", driverEvt)
+	}
+
+	passEvt := firstSubRideCancelledFor(sender, passengerID)
+	if passEvt == nil {
+		t.Fatal("expected sub_ride_cancelled to passenger, none sent")
+	}
+	if passEvt.SubRideID != subRideID || passEvt.RideID != rideID {
+		t.Errorf("passenger event fields wrong: %+v", passEvt)
+	}
+
+	// Parent ride must not have been touched.
+	if firstNotificationByEvent(sender, "ride_update") != nil {
+		t.Errorf("ride_update should NOT be emitted on passenger cancel")
+	}
+}
+
+func TestHandleCancel_Passenger_HappyPath_PickedUp(t *testing.T) {
+	const rideID = "ride-1"
+	const driverID = "driver-1"
+	const passengerID = "pass-1"
+	const subRideID = "sub-1"
+
+	db := &handlerMockDB{
+		GetRideFunc: func(ctx context.Context, id string) (*database.Ride, error) {
+			return &database.Ride{RideID: rideID, DriverID: driverID, Status: database.StatusActive}, nil
+		},
+		GetSubRideByRideAndPassengerFunc: func(ctx context.Context, rID, pID string) (*database.SubRide, error) {
+			return &database.SubRide{SubRideID: subRideID, RideID: rideID, PassengerID: passengerID, Status: database.StatusPickedUp}, nil
+		},
+		CancelSubRideIfActiveFunc: func(ctx context.Context, id string) (bool, error) {
+			return true, nil
+		},
+	}
+	sender := &mockSender{}
+	h := &Handler{db: db, producer: sender}
+
+	h.handleCancel(context.Background(), InboundMessage{
+		Action: ActionCancel, RideID: rideID, UserID: passengerID, Reason: "emergency",
+	})
+
+	if firstSubRideCancelledFor(sender, driverID) == nil {
+		t.Fatal("expected driver-bound sub_ride_cancelled")
+	}
+	if firstSubRideCancelledFor(sender, passengerID) == nil {
+		t.Fatal("expected passenger-bound sub_ride_cancelled")
+	}
+}
+
 // Ensure sql and json are referenced so they remain importable for later tasks.
 var _ = sql.ErrNoRows
 var _ = json.Marshal

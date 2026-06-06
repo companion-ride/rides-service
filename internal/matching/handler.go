@@ -353,10 +353,46 @@ func (h *Handler) handleCancel(ctx context.Context, msg InboundMessage) {
 }
 
 // handlePassengerCancel atomically flips a single sub-ride to cancelled and
-// notifies both the driver and the cancelling passenger. Body filled in Task 6.
+// notifies both the driver and the cancelling passenger.
 func (h *Handler) handlePassengerCancel(ctx context.Context, msg InboundMessage, ride *database.Ride, subRide *database.SubRide) {
-	_ = ctx
-	_ = msg
-	_ = ride
-	_ = subRide
+	didCancel, err := h.db.CancelSubRideIfActive(ctx, subRide.SubRideID)
+	if err != nil {
+		slog.Error("failed to cancel sub-ride", "sub_ride_id", subRide.SubRideID, "ride_id", ride.RideID, "user_id", msg.UserID, "error", err)
+		h.sendError(ctx, msg.UserID, ride.RideID, "internal error")
+		return
+	}
+	if !didCancel {
+		// Sub-ride was already in a terminal state. Use the freshly-read
+		// snapshot's status in the error message — it may be slightly stale
+		// (someone else may have just moved it), but it's accurate enough
+		// for the user-facing message.
+		slog.Warn("sub-ride already in terminal state", "sub_ride_id", subRide.SubRideID, "status", subRide.Status)
+		h.sendError(ctx, msg.UserID, ride.RideID, "your sub-ride is already "+subRide.Status)
+		return
+	}
+
+	// Notify the driver: include passenger_id and reason.
+	if err := h.producer.Send(ctx, TopicRideNotifications, ride.DriverID, SubRideCancelledMessage{
+		UserID:      ride.DriverID,
+		Event:       EventSubRideCancelled,
+		RideID:      ride.RideID,
+		SubRideID:   subRide.SubRideID,
+		PassengerID: subRide.PassengerID,
+		Reason:      msg.Reason,
+	}); err != nil {
+		slog.Error("failed to notify driver of passenger cancel", "ride_id", ride.RideID, "driver_id", ride.DriverID, "error", err)
+	}
+
+	// Confirm to the cancelling passenger: omit passenger_id and reason
+	// (zero-value in Go struct → omitempty drops them from JSON).
+	if err := h.producer.Send(ctx, TopicRideNotifications, subRide.PassengerID, SubRideCancelledMessage{
+		UserID:    subRide.PassengerID,
+		Event:     EventSubRideCancelled,
+		RideID:    ride.RideID,
+		SubRideID: subRide.SubRideID,
+	}); err != nil {
+		slog.Error("failed to confirm passenger cancel", "ride_id", ride.RideID, "passenger_id", subRide.PassengerID, "error", err)
+	}
+
+	slog.Info("passenger cancelled sub-ride", "ride_id", ride.RideID, "sub_ride_id", subRide.SubRideID, "passenger_id", subRide.PassengerID, "reason", msg.Reason)
 }
