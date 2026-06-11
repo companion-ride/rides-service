@@ -26,6 +26,8 @@ COPY --from=build /app/main /app/main
 COPY --from=build /app/migrations /app/migrations
 COPY --from=build /app/web /app/web
 COPY --from=build /app/docs /app/docs
+RUN adduser -D -u 10001 app
+USER app
 EXPOSE ${PORT}
 CMD ["./main"]
 

@@ -27,6 +27,7 @@ tmp/
 
 # Project build
 main
+/api
 *templ.go
 
 # OS X generated file

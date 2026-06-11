@@ -61,9 +61,6 @@ func (s *Server) RegisterRoutes() http.Handler {
 	admin.GET("/drivers/active", s.AdminActiveDriversHandler)
 	admin.DELETE("/rides", s.AdminDeleteAllRidesHandler)
 
-	// Temporary: no auth required
-	r.DELETE("/admin/rides/all", s.AdminDeleteAllRidesHandler)
-
 	return r
 }
 

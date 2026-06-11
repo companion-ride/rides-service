@@ -361,7 +361,7 @@ func queryIntOrDefault(c *gin.Context, key string, def int) int {
 // AdminDeleteAllRidesHandler godoc
 //
 //	@Summary	Delete every ride (destructive)
-//	@Description	Wipes the rides table. Used during development and integration tests; admin role required when reached via /admin/rides. There is also a temporary unauthenticated alias at DELETE /admin/rides/all that must be removed before production.
+//	@Description	Wipes the rides table. Used during development and integration tests; admin role required.
 //	@Tags		admin
 //	@Security	BearerAuth
 //	@Produce	json

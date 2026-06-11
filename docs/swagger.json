@@ -350,7 +350,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Wipes the rides table. Used during development and integration tests; admin role required when reached via /admin/rides. There is also a temporary unauthenticated alias at DELETE /admin/rides/all that must be removed before production.",
+                "description": "Wipes the rides table. Used during development and integration tests; admin role required.",
                 "produces": [
                     "application/json"
                 ],
