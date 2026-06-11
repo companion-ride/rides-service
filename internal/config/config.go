@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -21,6 +22,7 @@ type Config struct {
 	DoubleGISAPIKey        string
 	JWTSecretKey           string
 	KafkaBootstrapServers  string
+	InternalAPIKey         string
 }
 
 func Load() *Config {
@@ -53,6 +55,7 @@ func Load() *Config {
 		DoubleGISAPIKey:        os.Getenv("DOUBLE_GIS_API_KEY"),
 		JWTSecretKey:           os.Getenv("JWT_SECRET_KEY"),
 		KafkaBootstrapServers:  envStringOrDefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+		InternalAPIKey:         strings.TrimSpace(os.Getenv("INTERNAL_API_KEY")),
 	}
 }
 

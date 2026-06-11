@@ -5,18 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
 
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
+	baseURL     string
+	internalKey string
+	httpClient  *http.Client
 }
 
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL, internalKey string) *Client {
 	return &Client{
-		baseURL: baseURL,
+		baseURL:     baseURL,
+		internalKey: internalKey,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -34,6 +37,7 @@ func (c *Client) GetCurrentLocation(ctx context.Context, userID string) (*Locati
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
+	req.Header.Set("X-Internal-Key", c.internalKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -41,6 +45,9 @@ func (c *Client) GetCurrentLocation(ctx context.Context, userID string) (*Locati
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		slog.Warn("location-service rejected the internal key; check INTERNAL_API_KEY in rides and location-service")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("location service returned status %d", resp.StatusCode)
 	}

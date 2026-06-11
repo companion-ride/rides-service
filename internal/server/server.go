@@ -36,7 +36,7 @@ func NewServer(cfg *config.Config, db database.Service, mp *config.MatchingParam
 		cfg:            cfg,
 		db:             db,
 		pathfinder:     pathfinder.NewClient(cfg.PathfinderURL),
-		location:       location.NewClient(cfg.LocationServiceURL),
+		location:       location.NewClient(cfg.LocationServiceURL, cfg.InternalAPIKey),
 		matchingParams: mp,
 	}
 

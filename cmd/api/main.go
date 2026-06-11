@@ -197,6 +197,10 @@ func main() {
 		})
 	}
 
+	if cfg.InternalAPIKey == "" {
+		slog.Warn("INTERNAL_API_KEY is empty — location-service will reject GET /last lookups")
+	}
+
 	// Kafka setup
 	var kafkaConsumer *kafkapkg.Consumer
 	var kafkaProducer *kafkapkg.Producer
@@ -206,7 +210,7 @@ func main() {
 		slog.Warn("KAFKA_BOOTSTRAP_SERVERS is empty — kafka producer/consumer disabled; ride matching will not work")
 	} else {
 		kafkaProducer = kafkapkg.NewProducer(cfg.KafkaBootstrapServers)
-		locClient := location.NewClient(cfg.LocationServiceURL)
+		locClient := location.NewClient(cfg.LocationServiceURL, cfg.InternalAPIKey)
 
 		offerMgr := matching.NewOfferManager(kafkaProducer, db, locClient, mpLoader)
 		handler := matching.NewHandler(offerMgr, db, kafkaProducer)
