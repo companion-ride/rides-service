@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -28,11 +29,15 @@ func (s *Server) RegisterRoutes() http.Handler {
 	// Public routes
 	r.GET("/", s.HelloWorldHandler)
 	r.GET("/health", s.healthHandler)
-	r.StaticFile("/driver", "./web/driver.html")
-	r.StaticFile("/passenger", "./web/passenger.html")
 	r.StaticFile("/docs", "./web/swagger.html")
 	r.GET("/docs/swagger.json", s.SwaggerJSONHandler)
-	r.GET("/config", s.ConfigHandler)
+
+	// Debug pages and the map key they read; off unless explicitly enabled.
+	if enabled, _ := strconv.ParseBool(os.Getenv("ENABLE_DEBUG_PAGES")); enabled {
+		r.StaticFile("/driver", "./web/driver.html")
+		r.StaticFile("/passenger", "./web/passenger.html")
+		r.GET("/config", s.ConfigHandler)
+	}
 
 	// Protected routes
 	protected := r.Group("/")

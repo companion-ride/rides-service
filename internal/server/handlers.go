@@ -29,8 +29,8 @@ func haversine(lat1, lon1, lat2, lon2 float64) float64 {
 
 // ConfigHandler godoc
 //
-//	@Summary	Get public client config
-//	@Description	Returns the 2GIS map API key used by the mobile clients to render maps.
+//	@Summary	Get debug page config
+//	@Description	Returns the 2GIS map API key used by the /driver and /passenger debug pages. Registered only when ENABLE_DEBUG_PAGES=true.
 //	@Tags		config
 //	@Produce	json
 //	@Success	200	{object}	map[string]string

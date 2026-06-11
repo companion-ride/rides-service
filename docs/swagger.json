@@ -599,14 +599,14 @@
         },
         "/config": {
             "get": {
-                "description": "Returns the 2GIS map API key used by the mobile clients to render maps.",
+                "description": "Returns the 2GIS map API key used by the /driver and /passenger debug pages. Registered only when ENABLE_DEBUG_PAGES=true.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "config"
                 ],
-                "summary": "Get public client config",
+                "summary": "Get debug page config",
                 "responses": {
                     "200": {
                         "description": "OK",

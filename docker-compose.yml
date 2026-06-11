@@ -26,6 +26,7 @@ services:
       DOUBLE_GIS_API_KEY: ${DOUBLE_GIS_API_KEY}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      ENABLE_DEBUG_PAGES: ${ENABLE_DEBUG_PAGES:-false}
     depends_on:
       psql_bp:
         condition: service_healthy
