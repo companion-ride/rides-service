@@ -32,9 +32,3 @@ main
 
 # OS X generated file
 .DS_Store
-
-.claude
-
-# Dolt database files (added by bd init)
-.dolt/
-*.db
