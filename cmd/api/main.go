@@ -202,7 +202,9 @@ func main() {
 	var kafkaProducer *kafkapkg.Producer
 	kafkaCtx, kafkaCancel := context.WithCancel(context.Background())
 
-	if cfg.KafkaBootstrapServers != "" {
+	if cfg.KafkaBootstrapServers == "" {
+		slog.Warn("KAFKA_BOOTSTRAP_SERVERS is empty — kafka producer/consumer disabled; ride matching will not work")
+	} else {
 		kafkaProducer = kafkapkg.NewProducer(cfg.KafkaBootstrapServers)
 		locClient := location.NewClient(cfg.LocationServiceURL)
 
@@ -216,7 +218,7 @@ func main() {
 			handler.HandleMessage,
 		)
 		go kafkaConsumer.Start(kafkaCtx)
-		slog.Info("kafka consumer started", "topic", matching.TopicRideRequests, "group", "rides-service")
+		slog.Info("kafka consumer started", "brokers", cfg.KafkaBootstrapServers, "topic", matching.TopicRideRequests, "group", "rides-service")
 	}
 
 	// Background cleanup: cancel expired rides every 5 minutes
